@@ -1,8 +1,19 @@
+import { polar, portal, usage } from "@polar-sh/better-auth"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { apiKey } from "@better-auth/api-key"
 import { db } from "./db"
+import { getPolarSdk } from "./polar"
 import * as schema from "./schema"
+
+const polarSdk = getPolarSdk()
+const polarAuthPlugin = polarSdk
+  ? polar({
+      client: polarSdk,
+      createCustomerOnSignUp: true,
+      use: [portal(), usage()],
+    })
+  : null
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
@@ -26,7 +37,8 @@ export const auth = betterAuth({
   },
 
   // API key plugin — foundation only (no key-management UX yet).
-  plugins: [apiKey()],
+  // Polar: customer on sign-up, portal + usage (checkout/webhooks added later).
+  plugins: [apiKey(), ...(polarAuthPlugin ? [polarAuthPlugin] : [])],
 })
 
 export type Session = typeof auth.$Infer.Session

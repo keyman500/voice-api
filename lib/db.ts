@@ -1,5 +1,5 @@
-import { neon } from "@neondatabase/serverless"
-import { drizzle } from "drizzle-orm/neon-http"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { Pool } from "pg"
 import * as schema from "./schema"
 
 export type DB = ReturnType<typeof createDb>
@@ -8,10 +8,11 @@ function createDb() {
   if (!process.env.DATABASE_URL) {
     throw new Error(
       "DATABASE_URL environment variable is required. " +
-        "Copy .env.example → .env.local and set your Neon connection string."
+        "Copy .env.example → .env.local and set your PostgreSQL connection string."
     )
   }
-  return drizzle(neon(process.env.DATABASE_URL), { schema })
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+  return drizzle(pool, { schema })
 }
 
 // Lazy singleton — initialized on first access, never at module load time.
