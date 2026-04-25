@@ -52,11 +52,12 @@ export const app = new Elysia({ prefix: "/api" })
           title: "Voice API",
           version: "0.0.1",
           description:
-            "Phase 1: agents, calls, and phone numbers — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie or `Authorization: Bearer <api_key>`.",
+            "Phase 1: LiveKit-backed agents, calls, phone numbers, and user LiveKit config — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie or `Authorization: Bearer <api_key>`.",
         },
         tags: [
+          { name: "LiveKit config", description: "Encrypted BYOK LiveKit connection settings" },
           { name: "Agents", description: "Voice agent configuration" },
-          { name: "Calls", description: "Call resources (stub; LiveKit integration later)" },
+          { name: "Calls", description: "Call resources backed by LiveKit SIP and local logs" },
           { name: "Phone numbers", description: "Phone number bindings" },
         ],
       },

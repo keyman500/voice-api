@@ -54,6 +54,13 @@ export const listAgentsQuery = t.Object({
   cursor: t.Optional(t.String()),
 })
 
+export const upsertLiveKitConfigBody = t.Object({
+  livekitUrl: t.String(),
+  apiKey: t.String(),
+  apiSecret: t.String(),
+  defaultSipOutboundTrunkId: t.Optional(t.String()),
+})
+
 export const callStatus = t.Union([
   t.Literal("queued"),
   t.Literal("ringing"),
@@ -152,8 +159,25 @@ export const callResponse = t.Object({
   duration: t.Optional(t.Number()),
   transcript: t.Optional(t.String()),
   recordingUrl: t.Optional(t.String()),
+  analysis: t.Optional(t.Record(t.String(), t.Unknown())),
+  events: t.Optional(
+    t.Array(
+      t.Object({
+        id: t.String(),
+        type: t.String(),
+        payload: t.Optional(t.Record(t.String(), t.Unknown())),
+        createdAt: t.String(),
+      })
+    )
+  ),
   metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+  providerOptions: t.Optional(t.Record(t.String(), t.Unknown())),
   raw: t.Unknown(),
+  roomName: t.Optional(t.String()),
+  livekitSipParticipantId: t.Optional(t.String()),
+  livekitSipCallId: t.Optional(t.String()),
+  livekitSipTrunkId: t.Optional(t.String()),
+  providerSource: t.Optional(t.Union([t.Literal("user"), t.Literal("platform")])),
 })
 
 export const phoneNumberResponse = t.Object({

@@ -5,6 +5,7 @@ process.env.DATABASE_URL ??=
   "postgresql://test:test@127.0.0.1:5432/voice_api_test"
 process.env.BETTER_AUTH_SECRET ??= "0".repeat(32)
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000"
+process.env.LIVEKIT_CREDENTIAL_ENCRYPTION_KEY ??= "test-livekit-encryption-key"
 
 import { jest } from "@jest/globals"
 

@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, boolean, integer } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core"
 
 // ---------------------------------------------------------------------------
 // Better Auth core tables
@@ -101,3 +109,151 @@ export const apikey = pgTable("apikey", {
   permissions: text("permissions"),
   metadata: text("metadata"),
 })
+
+// ---------------------------------------------------------------------------
+// Voice API product tables
+// ---------------------------------------------------------------------------
+
+export const livekitConfig = pgTable("livekit_config", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  encryptedUrl: text("encrypted_url").notNull(),
+  encryptedApiKey: text("encrypted_api_key").notNull(),
+  encryptedApiSecret: text("encrypted_api_secret").notNull(),
+  defaultSipOutboundTrunkId: text("default_sip_outbound_trunk_id"),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+})
+
+export const voiceAgent = pgTable(
+  "voice_agent",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name"),
+    voice: jsonb("voice").$type<Record<string, unknown> | null>(),
+    model: jsonb("model").$type<Record<string, unknown> | null>(),
+    firstMessage: text("first_message"),
+    maxDurationSeconds: integer("max_duration_seconds"),
+    backgroundSound: text("background_sound"),
+    voicemailMessage: text("voicemail_message"),
+    webhookUrl: text("webhook_url"),
+    webhookTimeoutSeconds: integer("webhook_timeout_seconds"),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("voice_agent_user_id_idx").on(table.userId)]
+)
+
+export const voiceCall = pgTable(
+  "voice_call",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").references(() => voiceAgent.id, {
+      onDelete: "set null",
+    }),
+    direction: text("direction").notNull().$defaultFn(() => "outbound"),
+    status: text("status").notNull().$defaultFn(() => "queued"),
+    toNumber: text("to_number"),
+    fromNumber: text("from_number"),
+    phoneNumberId: text("phone_number_id"),
+    livekitRoomName: text("livekit_room_name"),
+    livekitSipParticipantId: text("livekit_sip_participant_id"),
+    livekitSipCallId: text("livekit_sip_call_id"),
+    livekitSipTrunkId: text("livekit_sip_trunk_id"),
+    providerSource: text("provider_source").notNull().$defaultFn(() => "user"),
+    startedAt: timestamp("started_at"),
+    endedAt: timestamp("ended_at"),
+    duration: integer("duration"),
+    transcript: text("transcript"),
+    recordingUrl: text("recording_url"),
+    analysis: jsonb("analysis").$type<Record<string, unknown> | null>(),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("voice_call_user_id_idx").on(table.userId),
+    index("voice_call_agent_id_idx").on(table.agentId),
+    index("voice_call_status_idx").on(table.status),
+  ]
+)
+
+export const voicePhoneNumber = pgTable(
+  "voice_phone_number",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    number: text("number"),
+    name: text("name"),
+    inboundAgentId: text("inbound_agent_id").references(() => voiceAgent.id, {
+      onDelete: "set null",
+    }),
+    outboundAgentId: text("outbound_agent_id").references(() => voiceAgent.id, {
+      onDelete: "set null",
+    }),
+    webhookUrl: text("webhook_url"),
+    areaCode: text("area_code"),
+    livekitSipInboundTrunkId: text("livekit_sip_inbound_trunk_id"),
+    livekitSipOutboundTrunkId: text("livekit_sip_outbound_trunk_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("voice_phone_number_user_id_idx").on(table.userId)]
+)
+
+export const voiceCallEvent = pgTable(
+  "voice_call_event",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    callId: text("call_id")
+      .notNull()
+      .references(() => voiceCall.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("voice_call_event_call_id_idx").on(table.callId),
+    index("voice_call_event_user_id_idx").on(table.userId),
+  ]
+)

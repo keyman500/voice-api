@@ -14,7 +14,10 @@ export type JsonAgent = {
   }
   firstMessage?: string
   metadata?: Record<string, unknown>
+  providerOptions?: Record<string, unknown>
   raw: unknown
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type JsonCall = {
@@ -35,8 +38,18 @@ export type JsonCall = {
   duration?: number
   transcript?: string
   recordingUrl?: string
+  analysis?: Record<string, unknown>
+  events?: JsonCallEvent[]
   metadata?: Record<string, unknown>
+  providerOptions?: Record<string, unknown>
   raw: unknown
+  roomName?: string
+  livekitSipParticipantId?: string
+  livekitSipCallId?: string
+  livekitSipTrunkId?: string
+  providerSource?: "user" | "platform"
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type JsonPhoneNumber = {
@@ -51,11 +64,38 @@ export type JsonPhoneNumber = {
   webhookUrl?: string
   areaCode?: string
   metadata?: Record<string, unknown>
+  providerOptions?: Record<string, unknown>
   raw: unknown
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type PaginatedList<T> = {
   items: T[]
   hasMore: boolean
   nextCursor?: string
+}
+
+export type JsonCallEvent = {
+  id: string
+  type: string
+  payload?: Record<string, unknown>
+  createdAt: string
+}
+
+export type RedactedLiveKitConfig = {
+  configured: boolean
+  providerSource: "user" | "platform" | "none"
+  livekitUrl?: string
+  apiKeyPrefix?: string
+  defaultSipOutboundTrunkId?: string
+  updatedAt?: string
+}
+
+export type LiveKitCredentials = {
+  url: string
+  apiKey: string
+  apiSecret: string
+  defaultSipOutboundTrunkId?: string
+  source: "user" | "platform"
 }

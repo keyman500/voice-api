@@ -1,13 +1,21 @@
 import { Elysia } from "elysia"
 import type { AuthedContext } from "@/lib/resolve-user"
 import { resolveAuthedContext } from "@/lib/resolve-user"
-import { voiceInMemory } from "./services"
+import { getVoiceService, VoiceServiceError } from "./services"
 import * as s from "./v1-schemas"
 
 type RouteCtx = { authed: AuthedContext }
 
+function serviceError(error: unknown, set: { status?: number | string }) {
+  if (error instanceof VoiceServiceError) {
+    set.status = error.status
+    return { error: { code: error.code, message: error.message } }
+  }
+  throw error
+}
+
 /**
- * Phase 1 voice resources — `voice-ai-sdk`–aligned names; stubbed data until LiveKit integration.
+ * Phase 1 voice resources — `voice-ai-sdk`–aligned names backed by Drizzle + LiveKit.
  * Mounted at `/api/v1/...` (Elysia app has prefix `/api`).
  */
 export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
@@ -30,12 +38,72 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
   })
 
   // -------------------------------------------------------------------------
+  // LiveKit config
+  // -------------------------------------------------------------------------
+  .get(
+    "/livekit-config",
+    ({ authed }) => getVoiceService().getLiveKitConfig(authed.user.id),
+    {
+      authUser: true,
+      detail: {
+        summary: "Get redacted LiveKit config",
+        description:
+          "Returns only redacted credential status. Secrets are encrypted at rest and never returned.",
+        tags: ["LiveKit config"],
+      },
+    }
+  )
+
+  .put(
+    "/livekit-config",
+    ({ authed, body }) =>
+      getVoiceService().upsertLiveKitConfig(authed.user.id, {
+        livekitUrl: body.livekitUrl,
+        apiKey: body.apiKey,
+        apiSecret: body.apiSecret,
+        defaultSipOutboundTrunkId: body.defaultSipOutboundTrunkId,
+      }),
+    {
+      authUser: true,
+      body: s.upsertLiveKitConfigBody,
+      detail: { summary: "Set LiveKit config", tags: ["LiveKit config"] },
+    }
+  )
+
+  .post(
+    "/livekit-config/test",
+    async ({ authed, set }) => {
+      try {
+        return await getVoiceService().testLiveKitConfig(authed.user.id)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      detail: { summary: "Test LiveKit config", tags: ["LiveKit config"] },
+    }
+  )
+
+  .delete(
+    "/livekit-config",
+    async ({ authed }) => {
+      const deleted = await getVoiceService().deleteLiveKitConfig(authed.user.id)
+      return { ok: true as const, deleted }
+    },
+    {
+      authUser: true,
+      detail: { summary: "Delete LiveKit config", tags: ["LiveKit config"] },
+    }
+  )
+
+  // -------------------------------------------------------------------------
   // Agents
   // -------------------------------------------------------------------------
   .get(
     "/agents",
     ({ authed, query }) =>
-      voiceInMemory.listAgents(authed.user.id, {
+      getVoiceService().listAgents(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
       }),
@@ -45,7 +113,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
       detail: {
         summary: "List agents",
         description:
-          "Lists agents (SDK `agents.list`). Stub store until LiveKit + persistence land.",
+          "Lists stored agents (SDK `agents.list`) backed by the Voice API database.",
         tags: ["Agents"],
       },
     }
@@ -53,8 +121,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .get(
     "/agents/:id",
-    ({ authed, params, set }) => {
-      const a = voiceInMemory.getAgent(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const a = await getVoiceService().getAgent(authed.user.id, params.id)
       if (!a) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Agent not found" } }
@@ -74,7 +142,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
   .post(
     "/agents",
     ({ authed, body }) =>
-      voiceInMemory.createAgent(authed.user.id, {
+      getVoiceService().createAgent(authed.user.id, {
         name: body.name,
         voice: body.voice,
         model: body.model,
@@ -96,8 +164,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .patch(
     "/agents/:id",
-    ({ authed, params, body, set }) => {
-      const a = voiceInMemory.updateAgent(authed.user.id, params.id, {
+    async ({ authed, params, body, set }) => {
+      const a = await getVoiceService().updateAgent(authed.user.id, params.id, {
         name: body.name,
         voice: body.voice,
         model: body.model,
@@ -126,8 +194,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .delete(
     "/agents/:id",
-    ({ authed, params, set }) => {
-      const ok = voiceInMemory.deleteAgent(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const ok = await getVoiceService().deleteAgent(authed.user.id, params.id)
       if (!ok) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Agent not found" } }
@@ -147,7 +215,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
   .get(
     "/calls",
     ({ authed, query }) =>
-      voiceInMemory.listCalls(authed.user.id, {
+      getVoiceService().listCalls(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
         agentId: query.agentId,
@@ -160,7 +228,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
       detail: {
         summary: "List calls",
         description:
-          "SDK `calls.list` shape; extra list filters are accepted for Vapi/Retell-style parity. Stub filters only: agentId, phoneNumberId (in metadata), callStatus.",
+          "SDK `calls.list` shape; extra list filters are accepted for Vapi/Retell-style parity.",
         tags: ["Calls"],
       },
     }
@@ -168,8 +236,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .get(
     "/calls/:id",
-    ({ authed, params, set }) => {
-      const c = voiceInMemory.getCall(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const c = await getVoiceService().getCall(authed.user.id, params.id)
       if (!c) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -185,33 +253,30 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .post(
     "/calls",
-    ({ authed, body, set }) => {
-      if (body.agentId) {
-        const a = voiceInMemory.getAgent(authed.user.id, body.agentId)
-        if (!a) {
-          set.status = 400
-          return { error: { code: "AGENT_NOT_FOUND", message: "agentId not found" } }
-        }
+    async ({ authed, body, set }) => {
+      try {
+        return await getVoiceService().createCall(authed.user.id, {
+          agentId: body.agentId,
+          toNumber: body.toNumber,
+          fromNumber: body.fromNumber,
+          metadata: body.metadata,
+          providerOptions: body.providerOptions,
+        })
+      } catch (error) {
+        return serviceError(error, set)
       }
-      return voiceInMemory.createCall(authed.user.id, {
-        agentId: body.agentId,
-        toNumber: body.toNumber,
-        fromNumber: body.fromNumber,
-        metadata: body.metadata,
-        providerOptions: body.providerOptions,
-      })
     },
     {
       authUser: true,
       body: s.createCallBody,
-      detail: { summary: "Create outbound call (stub)", tags: ["Calls"] },
+      detail: { summary: "Create outbound LiveKit SIP call", tags: ["Calls"] },
     }
   )
 
   .patch(
     "/calls/:id",
-    ({ authed, params, body, set }) => {
-      const c = voiceInMemory.updateCall(authed.user.id, params.id, {
+    async ({ authed, params, body, set }) => {
+      const c = await getVoiceService().updateCall(authed.user.id, params.id, {
         metadata: body.metadata,
         providerOptions: body.providerOptions,
         status: body.status,
@@ -235,8 +300,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .delete(
     "/calls/:id",
-    ({ authed, params, set }) => {
-      const ok = voiceInMemory.deleteCall(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const ok = await getVoiceService().deleteCall(authed.user.id, params.id)
       if (!ok) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -256,7 +321,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
   .get(
     "/phone-numbers",
     ({ authed, query }) =>
-      voiceInMemory.listPhoneNumbers(authed.user.id, {
+      getVoiceService().listPhoneNumbers(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
       }),
@@ -269,8 +334,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .get(
     "/phone-numbers/:id",
-    ({ authed, params, set }) => {
-      const p = voiceInMemory.getPhoneNumber(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const p = await getVoiceService().getPhoneNumber(authed.user.id, params.id)
       if (!p) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Phone number not found" } }
@@ -287,7 +352,7 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
   .post(
     "/phone-numbers",
     ({ authed, body }) =>
-      voiceInMemory.createPhoneNumber(authed.user.id, {
+      getVoiceService().createPhoneNumber(authed.user.id, {
         name: body.name,
         inboundAgentId: body.inboundAgentId,
         outboundAgentId: body.outboundAgentId,
@@ -299,14 +364,14 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
     {
       authUser: true,
       body: s.createPhoneNumberBody,
-      detail: { summary: "Create phone number (stub)", tags: ["Phone numbers"] },
+      detail: { summary: "Create phone number binding", tags: ["Phone numbers"] },
     }
   )
 
   .patch(
     "/phone-numbers/:id",
-    ({ authed, params, body, set }) => {
-      const p = voiceInMemory.updatePhoneNumber(authed.user.id, params.id, {
+    async ({ authed, params, body, set }) => {
+      const p = await getVoiceService().updatePhoneNumber(authed.user.id, params.id, {
         name: body.name,
         inboundAgentId: body.inboundAgentId,
         outboundAgentId: body.outboundAgentId,
@@ -330,8 +395,8 @@ export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
 
   .delete(
     "/phone-numbers/:id",
-    ({ authed, params, set }) => {
-      const ok = voiceInMemory.deletePhoneNumber(authed.user.id, params.id)
+    async ({ authed, params, set }) => {
+      const ok = await getVoiceService().deletePhoneNumber(authed.user.id, params.id)
       if (!ok) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Phone number not found" } }

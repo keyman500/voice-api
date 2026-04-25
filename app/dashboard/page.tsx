@@ -109,7 +109,7 @@ export default async function DashboardPage() {
                         <span className="ml-2 text-muted-foreground">
                             — Voice resources (session cookie or{" "}
                             <code className="text-xs">Authorization: Bearer</code>{" "}
-                            API key; stub data until LiveKit is wired)
+                            API key; LiveKit config controls outbound calls)
                         </span>
                     </li>
                 </ul>

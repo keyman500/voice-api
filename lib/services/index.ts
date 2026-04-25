@@ -1,11 +1,15 @@
-/**
- * Voice product services — replace in-memory implementations with LiveKit / DB
- * without changing `/api/v1` route contracts.
- */
-export { voiceInMemory } from "./voice-in-memory"
+export {
+  createVoiceService,
+  getVoiceService,
+  setVoiceServiceForTests,
+  VoiceServiceError,
+} from "./voice-service"
 export type {
   JsonAgent,
   JsonCall,
+  JsonCallEvent,
   JsonPhoneNumber,
+  LiveKitCredentials,
   PaginatedList,
+  RedactedLiveKitConfig,
 } from "./voice-types"

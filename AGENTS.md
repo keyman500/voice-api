@@ -69,6 +69,13 @@ Next.js App Router
 11. When adding or changing endpoint response shapes, check compatibility with `keyman500/voice-ai-sdk`.
 12. Prefer predictable, versioned response shapes so SDK consumers are not broken by additions.
 
+### Testing
+
+13. This project is test-driven. Add or update tests before/with behavior changes.
+14. API route tests should exercise `app.handle` with mocked auth and assert status codes plus response shapes.
+15. Service tests must mock database/repository calls and external SDK clients, then assert the expected DB writes/updates and LiveKit SDK method parameters.
+16. For LiveKit-backed behavior, cover success, missing config, provider fallback, SDK failure, and stored call logs/events.
+
 ---
 
 ## Environment Variables
