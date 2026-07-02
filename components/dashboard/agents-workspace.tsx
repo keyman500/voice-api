@@ -20,6 +20,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/eden"
 import {
@@ -73,6 +80,147 @@ const defaultValues: AgentFormValues = {
   webhookTimeoutSeconds: "",
   metadata: "",
   providerOptions: "",
+}
+
+type Option = {
+  value: string
+  label: string
+  description?: string
+}
+
+const LIVEKIT_VOICE_PROVIDER_OPTIONS: Option[] = [
+  {
+    value: "cartesia",
+    label: "Cartesia",
+    description: "LiveKit TTS provider",
+  },
+  {
+    value: "deepgram",
+    label: "Deepgram",
+    description: "LiveKit TTS provider",
+  },
+  {
+    value: "elevenlabs",
+    label: "ElevenLabs",
+    description: "LiveKit TTS provider",
+  },
+]
+
+const LIVEKIT_VOICE_ID_OPTIONS: Record<string, Option[]> = {
+  cartesia: [
+    {
+      value: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+      label: "Cartesia default voice",
+      description: "Docs example voice ID",
+    },
+    {
+      value: "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+      label: "Cartesia sample voice",
+      description: "Docs descriptor example voice ID",
+    },
+  ],
+  deepgram: [
+    {
+      value: "athena",
+      label: "Athena",
+      description: "Smooth, professional female",
+    },
+    {
+      value: "apollo",
+      label: "Apollo",
+      description: "Comfortable, casual male",
+    },
+    {
+      value: "odysseus",
+      label: "Odysseus",
+      description: "Calm, professional male",
+    },
+    {
+      value: "theia",
+      label: "Theia",
+      description: "Expressive, polite female",
+    },
+  ],
+  elevenlabs: [
+    {
+      value: "Xb7hH8MSUJpSbSDYk0k2",
+      label: "ElevenLabs inference voice",
+      description: "Docs string-descriptor example voice ID",
+    },
+    {
+      value: "ODq5zmih8GrVes37Dizd",
+      label: "ElevenLabs plugin voice",
+      description: "Docs plugin example voice ID",
+    },
+    {
+      value: "EXAVITQu4vr4xnSDxMaL",
+      label: "ElevenLabs default voice",
+      description: "Docs default voice ID",
+    },
+  ],
+}
+
+const LIVEKIT_MODEL_PROVIDER_OPTIONS: Option[] = [
+  { value: "openai", label: "OpenAI" },
+  { value: "google", label: "Google Gemini" },
+  { value: "deepseek-ai", label: "DeepSeek" },
+  { value: "moonshotai", label: "Moonshot / Kimi" },
+  { value: "qwen", label: "Qwen" },
+  { value: "xai", label: "xAI" },
+]
+
+const LIVEKIT_MODEL_NAME_OPTIONS: Record<string, Option[]> = {
+  openai: [
+    { value: "openai/gpt-4.1", label: "GPT-4.1" },
+    { value: "openai/gpt-4.1-mini", label: "GPT-4.1 mini" },
+    { value: "openai/gpt-4o", label: "GPT-4o" },
+    { value: "openai/gpt-4o-mini", label: "GPT-4o mini" },
+    { value: "openai/gpt-5", label: "GPT-5" },
+    { value: "openai/gpt-5-mini", label: "GPT-5 mini" },
+    { value: "openai/gpt-5.4", label: "GPT-5.4" },
+    { value: "openai/gpt-5.4-mini", label: "GPT-5.4 mini" },
+  ],
+  google: [
+    { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+    { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash" },
+    {
+      value: "google/gemini-3.1-flash-lite-preview",
+      label: "Gemini 3.1 Flash Lite",
+    },
+    { value: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  ],
+  "deepseek-ai": [{ value: "deepseek-ai/deepseek-v3", label: "DeepSeek V3" }],
+  moonshotai: [{ value: "moonshotai/kimi-k2.5", label: "Kimi K2.5" }],
+  qwen: [
+    {
+      value: "qwen/qwen3-235b-a22b-instruct",
+      label: "Qwen3 235B-A22B Instruct",
+    },
+  ],
+  xai: [
+    { value: "xai/grok-4-1-fast-non-reasoning", label: "Grok 4.1 Fast" },
+    {
+      value: "xai/grok-4-1-fast-reasoning",
+      label: "Grok 4.1 Fast Reasoning",
+    },
+    { value: "xai/grok-4.20-0309-non-reasoning", label: "Grok 4.20" },
+  ],
+}
+
+function withCurrentValue(options: Option[], currentValue: string) {
+  if (!currentValue.trim()) return options
+  if (options.some((option) => option.value === currentValue)) return options
+
+  return [
+    ...options,
+    {
+      value: currentValue,
+      label: `${currentValue} (saved custom value)`,
+      description: "Previously saved on this agent",
+    },
+  ]
 }
 
 function valuesFromAgent(agent?: JsonAgent | null): AgentFormValues {
@@ -183,6 +331,18 @@ function AgentForm({
   })
 
   const isEditing = Boolean(selectedAgent)
+  const selectedVoiceProvider = form.watch("voiceProvider")
+  const selectedVoiceId = form.watch("voiceId")
+  const selectedModelProvider = form.watch("modelProvider")
+  const selectedModelName = form.watch("modelName")
+  const voiceOptions = withCurrentValue(
+    LIVEKIT_VOICE_ID_OPTIONS[selectedVoiceProvider] ?? [],
+    selectedVoiceId
+  )
+  const modelOptions = withCurrentValue(
+    LIVEKIT_MODEL_NAME_OPTIONS[selectedModelProvider] ?? [],
+    selectedModelName
+  )
 
   useEffect(() => {
     form.reset(valuesFromAgent(selectedAgent))
@@ -261,36 +421,150 @@ function AgentForm({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="voice-id">Voice ID</Label>
-          <Input
-            id="voice-id"
-            placeholder="alloy"
-            {...form.register("voiceId")}
+          <Label htmlFor="voice-provider">Voice provider</Label>
+          <Controller
+            name="voiceProvider"
+            control={form.control}
+            render={({ field }) => (
+              <Select
+                value={field.value || "none"}
+                onValueChange={(value) => {
+                  const nextValue = value === "none" || !value ? "" : value
+                  field.onChange(nextValue)
+                  if (
+                    nextValue &&
+                    !LIVEKIT_VOICE_ID_OPTIONS[nextValue]?.some(
+                      (option) => option.value === form.getValues("voiceId")
+                    )
+                  ) {
+                    form.setValue("voiceId", "")
+                  }
+                }}
+              >
+                <SelectTrigger id="voice-provider" className="w-full">
+                  <SelectValue placeholder="Select a LiveKit TTS provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No preset provider</SelectItem>
+                  {LIVEKIT_VOICE_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="voice-provider">Voice provider</Label>
-          <Input
-            id="voice-provider"
-            placeholder="openai"
-            {...form.register("voiceProvider")}
+          <Label htmlFor="voice-id">Voice ID</Label>
+          <Controller
+            name="voiceId"
+            control={form.control}
+            render={({ field }) => (
+              <Select
+                value={field.value || "none"}
+                onValueChange={(value) =>
+                  field.onChange(value === "none" || !value ? "" : value)
+                }
+              >
+                <SelectTrigger id="voice-id" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      selectedVoiceProvider
+                        ? "Select a documented voice"
+                        : "Choose a provider first"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No preset voice ID</SelectItem>
+                  {voiceOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           />
+          <p className="text-xs text-muted-foreground">
+            Uses official LiveKit-documented sample voice IDs or voice names for
+            the selected provider.
+          </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="model-provider">Model provider</Label>
-          <Input
-            id="model-provider"
-            placeholder="openai"
-            {...form.register("modelProvider")}
+          <Controller
+            name="modelProvider"
+            control={form.control}
+            render={({ field }) => (
+              <Select
+                value={field.value || "none"}
+                onValueChange={(value) => {
+                  const nextValue = value === "none" || !value ? "" : value
+                  field.onChange(nextValue)
+                  if (
+                    nextValue &&
+                    !LIVEKIT_MODEL_NAME_OPTIONS[nextValue]?.some(
+                      (option) => option.value === form.getValues("modelName")
+                    )
+                  ) {
+                    form.setValue("modelName", "")
+                  }
+                }}
+              >
+                <SelectTrigger id="model-provider" className="w-full">
+                  <SelectValue placeholder="Select a LiveKit LLM provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No preset provider</SelectItem>
+                  {LIVEKIT_MODEL_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           />
         </div>
         <div className="space-y-2">
           <Label htmlFor="model-name">Model name</Label>
-          <Input
-            id="model-name"
-            placeholder="gpt-4.1-mini"
-            {...form.register("modelName")}
+          <Controller
+            name="modelName"
+            control={form.control}
+            render={({ field }) => (
+              <Select
+                value={field.value || "none"}
+                onValueChange={(value) =>
+                  field.onChange(value === "none" || !value ? "" : value)
+                }
+              >
+                <SelectTrigger id="model-name" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      selectedModelProvider
+                        ? "Select a LiveKit model"
+                        : "Choose a model provider first"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No preset model</SelectItem>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           />
+          <p className="text-xs text-muted-foreground">
+            Models are sourced from current LiveKit Inference LLM docs and
+            exclude retired entries.
+          </p>
         </div>
       </div>
 
