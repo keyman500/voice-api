@@ -25,6 +25,7 @@ import {
   KeyValue,
   StatusBadge,
 } from "@/components/dashboard/control-room-ui"
+import { CallTranscriptThread } from "@/components/dashboard/call-transcript-thread"
 import type { JsonCall } from "@/lib/services/voice-types"
 
 async function fetchCall(id: string) {
@@ -240,9 +241,7 @@ export function CallLogDetail({ id }: { id: string }) {
                 <p className="mb-2 text-xs tracking-[0.18em] text-muted-foreground uppercase">
                   Transcript
                 </p>
-                <div className="rounded-[1.5rem] border border-border/70 bg-background/75 px-4 py-4 text-sm leading-7 text-foreground">
-                  {call.transcript ?? "No transcript stored for this call."}
-                </div>
+                <CallTranscriptThread transcript={call.transcript} />
               </div>
               <div>
                 <p className="mb-2 text-xs tracking-[0.18em] text-muted-foreground uppercase">
