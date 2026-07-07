@@ -58,8 +58,10 @@ type AgentFormValues = {
   maxDurationSeconds: string
   backgroundSound: string
   voicemailMessage: string
+  successEvaluationPrompt: string
   webhookUrl: string
   webhookTimeoutSeconds: string
+  webhookSecret: string
   metadata: string
   providerOptions: string
 }
@@ -76,8 +78,10 @@ const defaultValues: AgentFormValues = {
   maxDurationSeconds: "",
   backgroundSound: "",
   voicemailMessage: "",
+  successEvaluationPrompt: "",
   webhookUrl: "",
   webhookTimeoutSeconds: "",
+  webhookSecret: "",
   metadata: "",
   providerOptions: "",
 }
@@ -255,8 +259,12 @@ function valuesFromAgent(agent?: JsonAgent | null): AgentFormValues {
       "voicemailMessage" in agent.raw
         ? String((agent.raw as Record<string, unknown>).voicemailMessage ?? "")
         : "",
-    webhookUrl: "",
-    webhookTimeoutSeconds: "",
+    successEvaluationPrompt: agent.successEvaluationPrompt ?? "",
+    webhookUrl: agent.webhookUrl ?? "",
+    webhookTimeoutSeconds: agent.webhookTimeoutSeconds
+      ? String(agent.webhookTimeoutSeconds)
+      : "",
+    webhookSecret: "",
     metadata: stringifyJson(agent.metadata),
     providerOptions: stringifyJson(agent.providerOptions),
   }
@@ -302,10 +310,13 @@ function toPayload(values: AgentFormValues) {
       : undefined,
     backgroundSound: values.backgroundSound.trim() || undefined,
     voicemailMessage: values.voicemailMessage.trim() || undefined,
+    successEvaluationPrompt:
+      values.successEvaluationPrompt.trim() || undefined,
     webhookUrl: values.webhookUrl.trim() || undefined,
     webhookTimeoutSeconds: values.webhookTimeoutSeconds
       ? Number(values.webhookTimeoutSeconds)
       : undefined,
+    webhookSecret: values.webhookSecret.trim() || undefined,
     metadata,
     providerOptions,
   }
@@ -624,6 +635,33 @@ function AgentForm({
                 <Textarea
                   id="voicemail-message"
                   {...form.register("voicemailMessage")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="success-evaluation">
+                  Success evaluation prompt
+                </Label>
+                <Textarea
+                  id="success-evaluation"
+                  placeholder="Describe exactly what should make this call count as successful."
+                  {...form.register("successEvaluationPrompt")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="webhook-secret">
+                  Webhook signing secret
+                </Label>
+                <Input
+                  id="webhook-secret"
+                  type="password"
+                  placeholder={
+                    selectedAgent?.webhookSecretConfigured
+                      ? "Configured. Enter a new value to rotate."
+                      : "Required for signed finished-call webhooks"
+                  }
+                  {...form.register("webhookSecret")}
                 />
               </div>
 

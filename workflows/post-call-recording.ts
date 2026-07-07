@@ -14,10 +14,25 @@ export async function postCallRecordingWorkflow(
   const maxAttempts = 10
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await processPostCallRecording({
+      const result = await processPostCallRecording({
         ...input,
         failOnNotReady: attempt === maxAttempts,
       })
+      const maxWebhookAttempts = 3
+      for (
+        let webhookAttempt = 1;
+        webhookAttempt <= maxWebhookAttempts;
+        webhookAttempt += 1
+      ) {
+        try {
+          await deliverFinishedCallWebhook({ ...input, attempt: webhookAttempt })
+          break
+        } catch (error) {
+          if (webhookAttempt === maxWebhookAttempts) throw error
+          await sleep("10s")
+        }
+      }
+      return result
     } catch (error) {
       const code =
         error && typeof error === "object" && "code" in error
@@ -34,7 +49,12 @@ export async function postCallRecordingWorkflow(
     }
   }
 
-  return processPostCallRecording({ ...input, failOnNotReady: true })
+  const result = await processPostCallRecording({
+    ...input,
+    failOnNotReady: true,
+  })
+  await deliverFinishedCallWebhook({ ...input, attempt: 1 })
+  return result
 }
 
 export async function processPostCallRecording(
@@ -43,4 +63,12 @@ export async function processPostCallRecording(
   "use step"
 
   return getVoiceRelayService().processPostCall(input)
+}
+
+export async function deliverFinishedCallWebhook(
+  input: PostCallRecordingWorkflowInput & { attempt: number }
+) {
+  "use step"
+
+  return getVoiceRelayService().deliverFinishedCallWebhook(input)
 }

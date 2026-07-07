@@ -13,6 +13,10 @@ export type JsonAgent = {
     knowledgeBaseIds?: string[]
   }
   firstMessage?: string
+  successEvaluationPrompt?: string
+  webhookUrl?: string
+  webhookTimeoutSeconds?: number
+  webhookSecretConfigured?: boolean
   metadata?: Record<string, unknown>
   providerOptions?: Record<string, unknown>
   raw: unknown
@@ -63,6 +67,20 @@ export type JsonCall = {
   recordingIngestionError?: string
   analysisStatus?: "pending" | "processing" | "ready" | "failed"
   analysisError?: string
+  callSuccessful?: boolean | null
+  successEvaluationStatus?: "pending" | "processing" | "ready" | "failed"
+  successEvaluationReason?: string
+  successEvaluationError?: string
+  webhookDeliveryStatus?:
+    | "pending"
+    | "processing"
+    | "delivered"
+    | "failed"
+    | "skipped"
+  webhookDeliveryAttempts?: number
+  webhookDeliveryError?: string
+  webhookLastAttemptAt?: string
+  webhookDeliveredAt?: string
   providerSource?: "user" | "platform"
   createdAt?: string
   updatedAt?: string

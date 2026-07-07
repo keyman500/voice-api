@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import type { Body } from "files-sdk"
 import {
   createVoiceRepository,
@@ -113,6 +114,18 @@ function transcriptLine(role: string, text: string) {
   return `${role}: ${text}`
 }
 
+function webhookSignature(secret: string, timestamp: string, body: string) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`${timestamp}.${body}`)
+    .digest("hex")
+}
+
+function webhookTimeoutMs(seconds: number | undefined) {
+  const value = seconds ?? 10
+  return Math.max(1, Math.min(30, value)) * 1000
+}
+
 function relayOptions(agent: JsonAgent | null, callId: string, baseUrl?: string) {
   const providerOptions = agent?.providerOptions
   const relay = providerOptionRecord(providerOptions, "conversationRelay")
@@ -215,8 +228,10 @@ export function createVoiceRelayService(
         maxDurationSeconds?: number
         backgroundSound?: string
         voicemailMessage?: string
+        successEvaluationPrompt?: string
         webhookUrl?: string
         webhookTimeoutSeconds?: number
+        webhookSecret?: string
         metadata?: RecordInput
         providerOptions?: RecordInput
       }
@@ -229,8 +244,10 @@ export function createVoiceRelayService(
         maxDurationSeconds: input.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
         voicemailMessage: input.voicemailMessage,
+        successEvaluationPrompt: input.successEvaluationPrompt,
         webhookUrl: input.webhookUrl,
         webhookTimeoutSeconds: input.webhookTimeoutSeconds,
+        webhookSecret: input.webhookSecret,
         metadata: input.metadata ?? null,
         providerOptions: input.providerOptions ?? null,
         raw: {},
@@ -248,8 +265,10 @@ export function createVoiceRelayService(
         maxDurationSeconds?: number
         backgroundSound?: string
         voicemailMessage?: string
+        successEvaluationPrompt?: string
         webhookUrl?: string
         webhookTimeoutSeconds?: number
+        webhookSecret?: string
         metadata?: RecordInput
         providerOptions?: RecordInput
       }
@@ -262,8 +281,10 @@ export function createVoiceRelayService(
         maxDurationSeconds: input.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
         voicemailMessage: input.voicemailMessage,
+        successEvaluationPrompt: input.successEvaluationPrompt,
         webhookUrl: input.webhookUrl,
         webhookTimeoutSeconds: input.webhookTimeoutSeconds,
+        webhookSecret: input.webhookSecret,
         metadata: input.metadata,
         providerOptions: input.providerOptions,
       })
@@ -281,6 +302,7 @@ export function createVoiceRelayService(
         agentId?: string
         phoneNumberId?: string
         callStatus?: string
+        callSuccessful?: boolean
       }
     ) {
       return repo.listCalls(userId, q)
@@ -333,6 +355,8 @@ export function createVoiceRelayService(
         status: "queued",
         postCallStatus: "pending",
         analysisStatus: "pending",
+        successEvaluationStatus: "pending",
+        webhookDeliveryStatus: "pending",
         toNumber: input.toNumber,
         fromNumber,
         providerSource: credentials.source,
@@ -550,6 +574,8 @@ export function createVoiceRelayService(
           status: "ringing",
           postCallStatus: "pending",
           analysisStatus: "pending",
+          successEvaluationStatus: "pending",
+          webhookDeliveryStatus: "pending",
           toNumber,
           fromNumber: formValue(input.params, "From", "from"),
           phoneNumberId: phone.id,
@@ -748,8 +774,10 @@ export function createVoiceRelayService(
       await repo.updateCall(input.userId, input.callId, {
         postCallStatus: "processing",
         analysisStatus: "processing",
+        successEvaluationStatus: "processing",
         recordingIngestionError: null,
         analysisError: null,
+        successEvaluationError: null,
       })
       await repo.addCallEvent(input.userId, input.callId, "post_call.started")
 
@@ -817,6 +845,7 @@ export function createVoiceRelayService(
           })
         }
 
+        let analysisResult: Record<string, unknown> | undefined
         try {
           const refreshed = await repo.getCall(input.userId, input.callId)
           const analysis = await llm.analyzeCall({
@@ -824,6 +853,7 @@ export function createVoiceRelayService(
             transcript: refreshed?.transcript ?? call.transcript,
             events: refreshed?.events,
           })
+          analysisResult = analysis
           await repo.updateCall(input.userId, input.callId, {
             analysis,
             analysisStatus: "ready",
@@ -841,6 +871,50 @@ export function createVoiceRelayService(
           await repo.addCallEvent(input.userId, input.callId, "analysis.failed", {
             message,
           })
+        }
+
+        try {
+          const refreshed = await repo.getCall(input.userId, input.callId)
+          const agent = refreshed?.agentId
+            ? await repo.getAgent(input.userId, refreshed.agentId)
+            : null
+          const successEvaluation = await llm.evaluateCallSuccess({
+            callId: input.callId,
+            transcript: refreshed?.transcript ?? call.transcript,
+            successEvaluationPrompt: agent?.successEvaluationPrompt,
+            analysis: analysisResult ?? refreshed?.analysis,
+          })
+          const nextAnalysis = {
+            ...((analysisResult ?? refreshed?.analysis ?? {}) as Record<string, unknown>),
+            successEvaluation,
+          }
+          await repo.updateCall(input.userId, input.callId, {
+            analysis: nextAnalysis,
+            callSuccessful: successEvaluation.successful,
+            successEvaluationStatus: "ready",
+            successEvaluationReason: successEvaluation.reason,
+          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "success_evaluation.ready",
+            successEvaluation
+          )
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Success evaluation failed"
+          await repo.updateCall(input.userId, input.callId, {
+            successEvaluationStatus: "failed",
+            successEvaluationError: message,
+          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "success_evaluation.failed",
+            { message }
+          )
         }
 
         return { ok: true as const }
@@ -862,11 +936,134 @@ export function createVoiceRelayService(
           recordingIngestionError: message,
           analysisStatus: "failed",
           analysisError: message,
+          successEvaluationStatus: "failed",
+          successEvaluationError: message,
         })
         await repo.addCallEvent(input.userId, input.callId, "post_call.failed", {
           message,
         })
         throw error
+      }
+    },
+
+    async deliverFinishedCallWebhook(input: {
+      userId: string
+      callId: string
+      attempt: number
+    }) {
+      const call = await repo.getCall(input.userId, input.callId)
+      if (!call) {
+        throw new VoiceServiceError(404, "CALL_NOT_FOUND", "Call not found")
+      }
+      const agent = call.agentId
+        ? await repo.getAgent(input.userId, call.agentId)
+        : null
+      if (!agent?.webhookUrl) {
+        await repo.updateCall(input.userId, input.callId, {
+          webhookDeliveryStatus: "skipped",
+          webhookDeliveryAttempts: input.attempt,
+          webhookDeliveryError: null,
+          webhookLastAttemptAt: new Date(),
+        })
+        await repo.addCallEvent(input.userId, input.callId, "webhook.skipped", {
+          reason: "No agent webhook URL configured",
+        })
+        return { ok: true as const, skipped: true as const }
+      }
+
+      const secret = await repo.resolveAgentWebhookSecret(input.userId, agent.id)
+      if (!secret) {
+        const message = "Agent webhook secret is required for signed delivery"
+        await repo.updateCall(input.userId, input.callId, {
+          webhookDeliveryStatus: "failed",
+          webhookDeliveryAttempts: input.attempt,
+          webhookDeliveryError: message,
+          webhookLastAttemptAt: new Date(),
+        })
+        await repo.addCallEvent(input.userId, input.callId, "webhook.failed", {
+          attempt: input.attempt,
+          message,
+        })
+        throw new VoiceServiceError(400, "WEBHOOK_SECRET_MISSING", message)
+      }
+
+      const timestamp = new Date().toISOString()
+      const payload = {
+        type: "call.finished",
+        call,
+        transcript: call.transcript,
+        analysis: call.analysis,
+        callSuccessful: call.callSuccessful,
+        recording: {
+          available: Boolean(call.recordingStorageKey),
+          storageProvider: call.recordingStorageProvider,
+          contentType: call.recordingContentType,
+          sizeBytes: call.recordingSizeBytes,
+          ingestedAt: call.recordingIngestedAt,
+        },
+        createdAt: timestamp,
+      }
+      const body = JSON.stringify(payload)
+      const controller = new AbortController()
+      const timeout = setTimeout(
+        () => controller.abort(),
+        webhookTimeoutMs(agent.webhookTimeoutSeconds)
+      )
+
+      await repo.updateCall(input.userId, input.callId, {
+        webhookDeliveryStatus: "processing",
+        webhookDeliveryAttempts: input.attempt,
+        webhookDeliveryError: null,
+        webhookLastAttemptAt: new Date(),
+      })
+
+      try {
+        const response = await fetch(agent.webhookUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "voice-api-webhooks/1.0",
+            "x-voice-api-event": "call.finished",
+            "x-voice-api-timestamp": timestamp,
+            "x-voice-api-signature": `sha256=${webhookSignature(
+              secret,
+              timestamp,
+              body
+            )}`,
+          },
+          body,
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          throw new Error(`Webhook responded with status ${response.status}`)
+        }
+        await repo.updateCall(input.userId, input.callId, {
+          webhookDeliveryStatus: "delivered",
+          webhookDeliveryAttempts: input.attempt,
+          webhookDeliveryError: null,
+          webhookDeliveredAt: new Date(),
+        })
+        await repo.addCallEvent(input.userId, input.callId, "webhook.delivered", {
+          attempt: input.attempt,
+          status: response.status,
+        })
+        return { ok: true as const, skipped: false as const }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Webhook delivery failed"
+        await repo.updateCall(input.userId, input.callId, {
+          webhookDeliveryStatus: "failed",
+          webhookDeliveryAttempts: input.attempt,
+          webhookDeliveryError: message,
+          webhookLastAttemptAt: new Date(),
+        })
+        await repo.addCallEvent(input.userId, input.callId, "webhook.failed", {
+          attempt: input.attempt,
+          message,
+        })
+        throw error
+      } finally {
+        clearTimeout(timeout)
       }
     },
 

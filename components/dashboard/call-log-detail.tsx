@@ -187,6 +187,45 @@ export function CallLogDetail({ id }: { id: string }) {
                   </div>
                 ) : null}
               </div>
+
+              <div className="grid gap-3 rounded-[1.5rem] border border-border/70 bg-background/75 px-5 py-4 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-foreground">
+                      Success evaluation
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {call.successEvaluationReason ??
+                        (call.successEvaluationStatus === "failed"
+                          ? call.successEvaluationError
+                          : "No success evaluation stored yet.")}
+                    </p>
+                  </div>
+                  <StatusBadge
+                    status={
+                      call.callSuccessful === true
+                        ? "ended"
+                        : call.callSuccessful === false
+                          ? "error"
+                          : (call.successEvaluationStatus ?? "unknown")
+                    }
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-foreground">
+                      Finished-call webhook
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {call.webhookDeliveryError ??
+                        `${call.webhookDeliveryAttempts ?? 0} delivery attempt(s)`}
+                    </p>
+                  </div>
+                  <StatusBadge
+                    status={call.webhookDeliveryStatus ?? "unknown"}
+                  />
+                </div>
+              </div>
             </div>
           </DashboardPanel>
 

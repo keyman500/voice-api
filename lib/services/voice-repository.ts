@@ -71,6 +71,12 @@ function cleanUpdate<T extends Record<string, unknown>>(value: T): Partial<T> {
   ) as Partial<T>
 }
 
+function secretUpdate(value: string | null | undefined) {
+  if (value === undefined) return undefined
+  if (value === null || value.length === 0) return null
+  return encryptSecret(value)
+}
+
 function toAgent(row: typeof schema.voiceAgent.$inferSelect): JsonAgent {
   return {
     id: row.id,
@@ -79,6 +85,10 @@ function toAgent(row: typeof schema.voiceAgent.$inferSelect): JsonAgent {
     voice: (row.voice as JsonAgent["voice"]) ?? undefined,
     model: (row.model as JsonAgent["model"]) ?? undefined,
     firstMessage: row.firstMessage ?? undefined,
+    successEvaluationPrompt: row.successEvaluationPrompt ?? undefined,
+    webhookUrl: row.webhookUrl ?? undefined,
+    webhookTimeoutSeconds: row.webhookTimeoutSeconds ?? undefined,
+    webhookSecretConfigured: Boolean(row.encryptedWebhookSecret),
     metadata: row.metadata ?? undefined,
     providerOptions: row.providerOptions ?? undefined,
     raw: row.raw ?? {},
@@ -128,6 +138,19 @@ function toCall(
     recordingIngestionError: row.recordingIngestionError ?? undefined,
     analysisStatus: (row.analysisStatus as JsonCall["analysisStatus"]) ?? undefined,
     analysisError: row.analysisError ?? undefined,
+    callSuccessful: row.callSuccessful,
+    successEvaluationStatus:
+      (row.successEvaluationStatus as JsonCall["successEvaluationStatus"]) ??
+      undefined,
+    successEvaluationReason: row.successEvaluationReason ?? undefined,
+    successEvaluationError: row.successEvaluationError ?? undefined,
+    webhookDeliveryStatus:
+      (row.webhookDeliveryStatus as JsonCall["webhookDeliveryStatus"]) ??
+      undefined,
+    webhookDeliveryAttempts: row.webhookDeliveryAttempts ?? undefined,
+    webhookDeliveryError: row.webhookDeliveryError ?? undefined,
+    webhookLastAttemptAt: iso(row.webhookLastAttemptAt),
+    webhookDeliveredAt: iso(row.webhookDeliveredAt),
     providerSource: row.providerSource as JsonCall["providerSource"],
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
@@ -421,15 +444,21 @@ export function createVoiceRepository() {
 
     async createAgent(
       userId: string,
-      input: Omit<AgentInsert, "id" | "userId" | "createdAt" | "updatedAt">
+      input: Omit<AgentInsert, "id" | "userId" | "createdAt" | "updatedAt"> & {
+        webhookSecret?: string
+      }
     ): Promise<JsonAgent> {
+      const { webhookSecret, ...insert } = input
       const [row] = await db
         .insert(schema.voiceAgent)
         .values({
           id: crypto.randomUUID(),
           userId,
-          ...input,
-          raw: input.raw ?? {},
+          ...insert,
+          encryptedWebhookSecret: webhookSecret
+            ? encryptSecret(webhookSecret)
+            : null,
+          raw: insert.raw ?? {},
           createdAt: now(),
           updatedAt: now(),
         })
@@ -464,14 +493,36 @@ export function createVoiceRepository() {
     async updateAgent(
       userId: string,
       id: string,
-      input: Partial<AgentInsert>
+      input: Partial<AgentInsert> & { webhookSecret?: string | null }
     ): Promise<JsonAgent | null> {
+      const { webhookSecret, ...update } = input
       const rows = await db
         .update(schema.voiceAgent)
-        .set(cleanUpdate({ ...input, updatedAt: now() }))
+        .set(
+          cleanUpdate({
+            ...update,
+            encryptedWebhookSecret: secretUpdate(webhookSecret),
+            updatedAt: now(),
+          })
+        )
         .where(and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, id)))
         .returning()
       return rows[0] ? toAgent(rows[0]) : null
+    },
+
+    async resolveAgentWebhookSecret(userId: string, agentId: string) {
+      const [row] = await db
+        .select({
+          encryptedWebhookSecret: schema.voiceAgent.encryptedWebhookSecret,
+        })
+        .from(schema.voiceAgent)
+        .where(
+          and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, agentId))
+        )
+        .limit(1)
+      return row?.encryptedWebhookSecret
+        ? decryptSecret(row.encryptedWebhookSecret)
+        : null
     },
 
     async deleteAgent(userId: string, id: string): Promise<boolean> {
@@ -504,6 +555,7 @@ export function createVoiceRepository() {
         agentId?: string
         phoneNumberId?: string
         callStatus?: string
+        callSuccessful?: boolean
       }
     ): Promise<PaginatedList<JsonCall>> {
       let rows = await db
@@ -513,6 +565,9 @@ export function createVoiceRepository() {
       if (q.agentId) rows = rows.filter((row) => row.agentId === q.agentId)
       if (q.phoneNumberId) rows = rows.filter((row) => row.phoneNumberId === q.phoneNumberId)
       if (q.callStatus) rows = rows.filter((row) => row.status === q.callStatus)
+      if (typeof q.callSuccessful === "boolean") {
+        rows = rows.filter((row) => row.callSuccessful === q.callSuccessful)
+      }
       return takePage(
         rows
           .map((row) => toCall(row))

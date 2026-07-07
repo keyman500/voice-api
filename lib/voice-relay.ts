@@ -171,8 +171,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         maxDurationSeconds: body.maxDurationSeconds,
         backgroundSound: body.backgroundSound,
         voicemailMessage: body.voicemailMessage,
+        successEvaluationPrompt: body.successEvaluationPrompt,
         webhookUrl: body.webhookUrl,
         webhookTimeoutSeconds: body.webhookTimeoutSeconds,
+        webhookSecret: body.webhookSecret,
         metadata: body.metadata,
         providerOptions: body.providerOptions,
       }),
@@ -192,8 +194,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
           maxDurationSeconds: body.maxDurationSeconds,
           backgroundSound: body.backgroundSound,
           voicemailMessage: body.voicemailMessage,
+          successEvaluationPrompt: body.successEvaluationPrompt,
           webhookUrl: body.webhookUrl,
           webhookTimeoutSeconds: body.webhookTimeoutSeconds,
+          webhookSecret: body.webhookSecret,
           metadata: body.metadata,
           providerOptions: body.providerOptions,
         }
@@ -233,6 +237,7 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         agentId: query.agentId,
         phoneNumberId: query.phoneNumberId,
         callStatus: query.callStatus,
+        callSuccessful: query.callSuccessful,
       }),
     { authUser: true, query: s.listCallsQuery, detail: { tags: ["Calls"] } }
   )

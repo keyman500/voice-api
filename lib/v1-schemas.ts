@@ -29,8 +29,10 @@ export const createAgentBody = t.Object({
   maxDurationSeconds: t.Optional(t.Number()),
   backgroundSound: t.Optional(t.String()),
   voicemailMessage: t.Optional(t.String()),
+  successEvaluationPrompt: t.Optional(t.String()),
   webhookUrl: t.Optional(t.String()),
   webhookTimeoutSeconds: t.Optional(t.Number()),
+  webhookSecret: t.Optional(t.String()),
   metadata: optionalRecordUnknown,
   providerOptions: optionalRecordUnknown,
 })
@@ -43,8 +45,10 @@ export const updateAgentBody = t.Object({
   maxDurationSeconds: t.Optional(t.Number()),
   backgroundSound: t.Optional(t.String()),
   voicemailMessage: t.Optional(t.String()),
+  successEvaluationPrompt: t.Optional(t.String()),
   webhookUrl: t.Optional(t.String()),
   webhookTimeoutSeconds: t.Optional(t.Number()),
+  webhookSecret: t.Optional(t.String()),
   metadata: optionalRecordUnknown,
   providerOptions: optionalRecordUnknown,
 })
@@ -151,6 +155,10 @@ export const agentResponse = t.Object({
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
   firstMessage: t.Optional(t.String()),
+  successEvaluationPrompt: t.Optional(t.String()),
+  webhookUrl: t.Optional(t.String()),
+  webhookTimeoutSeconds: t.Optional(t.Number()),
+  webhookSecretConfigured: t.Optional(t.Boolean()),
   metadata: t.Optional(t.Record(t.String(), t.Unknown())),
   raw: t.Unknown(),
 })
@@ -189,6 +197,30 @@ export const callResponse = t.Object({
     ])
   ),
   analysisError: t.Optional(t.String()),
+  callSuccessful: t.Optional(t.Boolean()),
+  successEvaluationStatus: t.Optional(
+    t.Union([
+      t.Literal("pending"),
+      t.Literal("processing"),
+      t.Literal("ready"),
+      t.Literal("failed"),
+    ])
+  ),
+  successEvaluationReason: t.Optional(t.String()),
+  successEvaluationError: t.Optional(t.String()),
+  webhookDeliveryStatus: t.Optional(
+    t.Union([
+      t.Literal("pending"),
+      t.Literal("processing"),
+      t.Literal("delivered"),
+      t.Literal("failed"),
+      t.Literal("skipped"),
+    ])
+  ),
+  webhookDeliveryAttempts: t.Optional(t.Number()),
+  webhookDeliveryError: t.Optional(t.String()),
+  webhookLastAttemptAt: t.Optional(t.String()),
+  webhookDeliveredAt: t.Optional(t.String()),
   events: t.Optional(
     t.Array(
       t.Object({

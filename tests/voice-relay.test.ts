@@ -99,6 +99,10 @@ function createMockRelayService() {
         id: "agent-1",
         provider: VOICE_API_PROVIDER_ID,
         name: input.name,
+        successEvaluationPrompt: input.successEvaluationPrompt,
+        webhookUrl: input.webhookUrl,
+        webhookTimeoutSeconds: input.webhookTimeoutSeconds,
+        webhookSecretConfigured: Boolean(input.webhookSecret),
         raw: {},
       }
       agents.set(agent.id, agent)
@@ -136,6 +140,9 @@ function createMockRelayService() {
         twilioAccountSid: "AC123",
         recordingSid: "RE123",
         postCallStatus: "processing",
+        callSuccessful: true,
+        successEvaluationStatus: "ready",
+        successEvaluationReason: "The call was successful.",
         raw: { twilio: { sid: "CA123" } },
       }
       calls.set(call.id, call)
@@ -237,6 +244,41 @@ describe("/api/v1 relay routes", () => {
       twilioCallSid: "CA123",
       twilioAccountSid: "AC123",
     })
+  })
+
+  it("POST /api/v1/agents accepts success evaluation and redacts webhook secret", async () => {
+    const res = await handle("/api/v1/agents", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Support",
+        successEvaluationPrompt: "Successful only if a demo is booked.",
+        webhookUrl: "https://example.com/webhooks/voice",
+        webhookTimeoutSeconds: 5,
+        webhookSecret: "secret-token",
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({
+      successEvaluationPrompt: "Successful only if a demo is booked.",
+      webhookUrl: "https://example.com/webhooks/voice",
+      webhookSecretConfigured: true,
+    })
+    expect(JSON.stringify(body)).not.toContain("secret-token")
+  })
+
+  it("GET /api/v1/calls forwards callSuccessful filter", async () => {
+    const service = createMockRelayService()
+    setVoiceRelayServiceForTests(service as never)
+
+    const res = await handle("/api/v1/calls?callSuccessful=true")
+
+    expect(res.status).toBe(200)
+    expect(service.listCalls as jest.Mock).toHaveBeenCalledWith(
+      fakeUser.id,
+      expect.objectContaining({ callSuccessful: true })
+    )
   })
 
   it("POST /api/v1/twilio/voice returns ConversationRelay TwiML", async () => {

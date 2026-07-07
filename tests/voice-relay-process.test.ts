@@ -91,6 +91,10 @@ function createProcessRepo() {
       agents.set(String(id), next)
       return next
     }),
+    resolveAgentWebhookSecret: mockAsync(async (_userId, agentId) => {
+      const agent = agents.get(String(agentId))
+      return agent?.webhookSecret ?? null
+    }),
     deleteAgent: mockAsync(async (_userId, id) => agents.delete(String(id))),
     createCall: mockAsync(async (userId, input) => {
       const row: Record<string, unknown> = {
@@ -216,6 +220,10 @@ function createLlmMock() {
       keyMoments: [],
       transcriptQualityNotes: "Clear.",
     })),
+    evaluateCallSuccess: jest.fn(async () => ({
+      successful: true,
+      reason: "The caller got the help they needed.",
+    })),
   }
 }
 
@@ -225,6 +233,10 @@ function createFailingLlmMock() {
       throw new Error("rate limited")
     },
     analyzeCall: jest.fn(async () => ({ summary: "not used" })),
+    evaluateCallSuccess: jest.fn(async () => ({
+      successful: false,
+      reason: "not used",
+    })),
   }
 }
 
@@ -711,8 +723,180 @@ describe("voice relay service process behavior", () => {
     expect(stores.calls.get(String(call.id))).toMatchObject({
       postCallStatus: "ready",
       analysisStatus: "ready",
+      successEvaluationStatus: "ready",
+      callSuccessful: true,
+      successEvaluationReason: "The caller got the help they needed.",
       analysis: expect.objectContaining({ summary: "Caller needed help." }),
       recordingStorageKey: "recordings/call-1/rec-1.mp3",
+    })
+  })
+
+  it("post-call success evaluation uses the agent prompt when configured", async () => {
+    const { repo } = createProcessRepo()
+    const llm = createLlmMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      llm as never,
+      createFilesMock() as never
+    )
+
+    await service.createAgent(fakeUser.id, {
+      name: "Support",
+      successEvaluationPrompt: "The call is successful only if a demo was booked.",
+    })
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+    })
+    const call = await service.createCall(fakeUser.id, {
+      agentId: "agent-1",
+      toNumber: "+15555550100",
+    })
+    await service.handleRecordingWebhook({
+      callId: String(call.id),
+      params: { RecordingSid: "RE123", RecordingStatus: "completed" },
+    })
+
+    await service.processPostCall({ userId: fakeUser.id, callId: String(call.id) })
+
+    expect(llm.evaluateCallSuccess as jest.Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        successEvaluationPrompt:
+          "The call is successful only if a demo was booked.",
+      })
+    )
+  })
+
+  it("failed success evaluation does not break recording ingestion", async () => {
+    const { repo, stores } = createProcessRepo()
+    const llm = createLlmMock()
+    llm.evaluateCallSuccess.mockRejectedValue(new Error("eval failed"))
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      llm as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+    })
+    const call = await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
+    await service.handleRecordingWebhook({
+      callId: String(call.id),
+      params: { RecordingSid: "RE123", RecordingStatus: "completed" },
+    })
+
+    await expect(
+      service.processPostCall({ userId: fakeUser.id, callId: String(call.id) })
+    ).resolves.toEqual({ ok: true })
+
+    expect(stores.calls.get(String(call.id))).toMatchObject({
+      postCallStatus: "ready",
+      recordingStorageKey: "recordings/call-1/rec-1.mp3",
+      successEvaluationStatus: "failed",
+      successEvaluationError: "eval failed",
+    })
+  })
+
+  it("finished-call webhook sends signed payload when configured", async () => {
+    const { repo, stores } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }))
+
+    try {
+      await service.createAgent(fakeUser.id, {
+        name: "Support",
+        webhookUrl: "https://example.com/webhooks/voice",
+        webhookTimeoutSeconds: 5,
+        webhookSecret: "secret",
+      })
+      await service.upsertTwilioConfig(fakeUser.id, {
+        accountSid: "AC123456789",
+        authToken: "token",
+        defaultFromNumber: "+15555550123",
+      })
+      const call = await service.createCall(fakeUser.id, {
+        agentId: "agent-1",
+        toNumber: "+15555550100",
+      })
+      await service.handleRecordingWebhook({
+        callId: String(call.id),
+        params: { RecordingSid: "RE123", RecordingStatus: "completed" },
+      })
+      await service.processPostCall({
+        userId: fakeUser.id,
+        callId: String(call.id),
+      })
+
+      await expect(
+        service.deliverFinishedCallWebhook({
+          userId: fakeUser.id,
+          callId: String(call.id),
+          attempt: 1,
+        })
+      ).resolves.toMatchObject({ ok: true, skipped: false })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://example.com/webhooks/voice",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "x-voice-api-event": "call.finished",
+            "x-voice-api-signature": expect.stringMatching(/^sha256=/),
+          }),
+        })
+      )
+      expect(stores.calls.get(String(call.id))).toMatchObject({
+        webhookDeliveryStatus: "delivered",
+        webhookDeliveryAttempts: 1,
+      })
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it("finished-call webhook is skipped when no agent webhook URL is set", async () => {
+    const { repo, stores } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.createAgent(fakeUser.id, { name: "Support" })
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+    })
+    const call = await service.createCall(fakeUser.id, {
+      agentId: "agent-1",
+      toNumber: "+15555550100",
+    })
+
+    await expect(
+      service.deliverFinishedCallWebhook({
+        userId: fakeUser.id,
+        callId: String(call.id),
+        attempt: 1,
+      })
+    ).resolves.toMatchObject({ ok: true, skipped: true })
+
+    expect(stores.calls.get(String(call.id))).toMatchObject({
+      webhookDeliveryStatus: "skipped",
     })
   })
 
