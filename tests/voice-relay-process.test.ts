@@ -897,6 +897,7 @@ describe("voice relay service process behavior", () => {
 
     expect(stores.calls.get(String(call.id))).toMatchObject({
       webhookDeliveryStatus: "skipped",
+      webhookDeliveryAttempts: 0,
     })
   })
 

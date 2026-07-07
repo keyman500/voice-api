@@ -961,7 +961,7 @@ export function createVoiceRelayService(
       if (!agent?.webhookUrl) {
         await repo.updateCall(input.userId, input.callId, {
           webhookDeliveryStatus: "skipped",
-          webhookDeliveryAttempts: input.attempt,
+          webhookDeliveryAttempts: 0,
           webhookDeliveryError: null,
           webhookLastAttemptAt: new Date(),
         })

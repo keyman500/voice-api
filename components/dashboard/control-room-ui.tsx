@@ -131,8 +131,14 @@ export function MetricCard({
   )
 }
 
-export function StatusBadge({ status }: { status?: string }) {
-  return <Badge variant={statusTone(status)}>{status ?? "unknown"}</Badge>
+export function StatusBadge({
+  status,
+  label,
+}: {
+  status?: string
+  label?: string
+}) {
+  return <Badge variant={statusTone(status)}>{label ?? status ?? "unknown"}</Badge>
 }
 
 export function KeyValue({

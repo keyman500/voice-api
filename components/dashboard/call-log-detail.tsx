@@ -204,9 +204,9 @@ export function CallLogDetail({ id }: { id: string }) {
                   <StatusBadge
                     status={
                       call.callSuccessful === true
-                        ? "ended"
+                        ? "successful"
                         : call.callSuccessful === false
-                          ? "error"
+                          ? "unsuccessful"
                           : (call.successEvaluationStatus ?? "unknown")
                     }
                   />
@@ -217,7 +217,9 @@ export function CallLogDetail({ id }: { id: string }) {
                       Finished-call webhook
                     </p>
                     <p className="mt-1 text-muted-foreground">
-                      {call.webhookDeliveryError ??
+                      {call.webhookDeliveryStatus === "skipped"
+                        ? "No webhook URL configured"
+                        : call.webhookDeliveryError ??
                         `${call.webhookDeliveryAttempts ?? 0} delivery attempt(s)`}
                     </p>
                   </div>

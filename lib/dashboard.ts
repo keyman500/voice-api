@@ -106,9 +106,11 @@ export function statusTone(status?: string) {
   switch (status) {
     case "in-progress":
     case "ringing":
+    case "successful":
       return "default"
     case "ended":
       return "secondary"
+    case "unsuccessful":
     case "error":
       return "destructive"
     default:
