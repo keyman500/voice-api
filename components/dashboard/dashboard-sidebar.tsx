@@ -351,7 +351,14 @@ type DashboardShellProps = {
 
 export function DashboardShell({ children }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"
+    } catch {
+      return false
+    }
+  })
   const [collapseControlsReady, setCollapseControlsReady] = useState(false)
   const [isDesktop, setIsDesktop] = useState(false)
 
@@ -363,13 +370,6 @@ export function DashboardShell({ children }: DashboardShellProps) {
     }
     update()
     mq.addEventListener("change", update)
-    try {
-      if (window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") {
-        setSidebarCollapsed(true)
-      }
-    } catch {
-      // ignore
-    }
     return () => mq.removeEventListener("change", update)
   }, [])
 

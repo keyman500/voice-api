@@ -1,12 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   RiArrowLeftLine,
-  RiDownloadLine,
-  RiFileList3Line,
   RiPlayCircleLine,
+  RiRefreshLine,
 } from "@remixicon/react"
 
 import { Button } from "@/components/ui/button"
@@ -37,9 +36,25 @@ async function fetchCall(id: string) {
 }
 
 export function CallLogDetail({ id }: { id: string }) {
+  const queryClient = useQueryClient()
   const callQuery = useQuery({
     queryKey: dashboardQueryKeys.call(id),
     queryFn: () => fetchCall(id),
+  })
+  const retryMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.v1.calls({ id })["post-call"].retry.post()
+      if (error) {
+        throw new Error(
+          getApiErrorMessage(error, "Failed to restart post-call workflow")
+        )
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.call(id),
+      })
+    },
   })
 
   const call = callQuery.data
@@ -124,15 +139,54 @@ export function CallLogDetail({ id }: { id: string }) {
                 </p>
               </div>
 
-              {call.recordingUrl ? (
-                <Button
-                  variant="outline"
-                  render={<Link href={call.recordingUrl} target="_blank" />}
-                >
-                  <RiPlayCircleLine />
-                  Open recording
-                </Button>
-              ) : null}
+              <div className="space-y-3 rounded-[1.5rem] border border-border/70 bg-background/75 px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      Recording
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {call.postCallStatus === "ready"
+                        ? "Private Blob copy ready"
+                        : call.postCallStatus === "failed"
+                          ? "Post-call processing failed"
+                          : call.postCallStatus === "processing" ||
+                              call.postCallStatus === "pending"
+                            ? "Processing private Blob copy"
+                            : "No recording processed yet"}
+                    </p>
+                  </div>
+                  <StatusBadge status={call.postCallStatus ?? "unknown"} />
+                </div>
+                {call.postCallStatus === "ready" ? (
+                  <audio
+                    controls
+                    className="w-full"
+                    src={`/api/v1/calls/${call.id}/recording`}
+                  >
+                    <RiPlayCircleLine />
+                  </audio>
+                ) : null}
+                {call.postCallStatus === "failed" ? (
+                  <div className="space-y-3">
+                    <InlineError
+                      message={
+                        retryMutation.error?.message ??
+                        call.recordingIngestionError ??
+                        null
+                      }
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={retryMutation.isPending}
+                      onClick={() => retryMutation.mutate()}
+                    >
+                      <RiRefreshLine />
+                      {retryMutation.isPending ? "Restarting…" : "Retry"}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </DashboardPanel>
 
@@ -155,7 +209,14 @@ export function CallLogDetail({ id }: { id: string }) {
                 </p>
                 <JsonPreview
                   value={call.analysis}
-                  emptyLabel="No analysis stored for this call."
+                  emptyLabel={
+                    call.analysisStatus === "processing" ||
+                    call.analysisStatus === "pending"
+                      ? "Analysis is processing."
+                      : call.analysisStatus === "failed"
+                        ? (call.analysisError ?? "Analysis failed.")
+                        : "No analysis stored for this call."
+                  }
                 />
               </div>
               <div>

@@ -2,12 +2,12 @@ import type {
   PaginatedList,
   JsonAgent,
   JsonCall,
-  RedactedLiveKitConfig,
+  RedactedTwilioConfig,
 } from "@/lib/services/voice-types"
 
 export const dashboardQueryKeys = {
   agentsRoot: () => ["agents"] as const,
-  livekit: () => ["livekit-config"] as const,
+  livekit: () => ["twilio-config"] as const,
   agents: (limit = 100) => ["agents", limit] as const,
   callsRoot: () => ["calls"] as const,
   calls: (filters: Record<string, unknown> = {}) => ["calls", filters] as const,
@@ -16,7 +16,7 @@ export const dashboardQueryKeys = {
 
 export type AgentListResponse = PaginatedList<JsonAgent>
 export type CallListResponse = PaginatedList<JsonCall>
-export type LiveKitConfigResponse = RedactedLiveKitConfig
+export type LiveKitConfigResponse = RedactedTwilioConfig
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

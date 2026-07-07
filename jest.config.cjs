@@ -10,9 +10,14 @@ module.exports = {
   testMatch: ["**/*.test.ts"],
   moduleNameMapper: {
     "^@/(.*)$": path.join(__dirname, "$1"),
+    "^files-sdk$": path.join(__dirname, "node_modules/files-sdk/dist/index.js"),
+    "^files-sdk/(.*)$": path.join(
+      __dirname,
+      "node_modules/files-sdk/dist/$1/index.js"
+    ),
   },
   transform: {
-    "^.+\\.ts$": [
+    "^.+\\.[tj]s$": [
       "@swc/jest",
       {
         jsc: {
@@ -23,5 +28,6 @@ module.exports = {
       },
     ],
   },
+  transformIgnorePatterns: ["/node_modules/(?!files-sdk|@vercel/blob)/"],
   setupFilesAfterEnv: [path.join(__dirname, "tests", "setup.ts")],
 }

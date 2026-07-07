@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals"
+import { Elysia } from "elysia"
 import { VOICE_API_PROVIDER_ID } from "@/lib/voice-constants"
 
 jest.mock("@/lib/resolve-user")
@@ -16,9 +17,12 @@ const { setVoiceServiceForTests } = require("@/lib/services")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { liveKitAdapter } = require("@/lib/services/livekit-adapter")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { app } = require("@/lib/api")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { voiceLiveKit } = require("@/lib/voice-livekit")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { RoomServiceClient, SipClient } = require("livekit-server-sdk")
+
+const app = new Elysia({ prefix: "/api" }).use(voiceLiveKit)
 
 const fakeUser = {
   id: "jest-user-1",
@@ -264,7 +268,7 @@ beforeEach(() => {
   jest.mocked(SipClient).mockReset()
 })
 
-describe("/api/v1 endpoint process tests", () => {
+describe("parked LiveKit /api/v1 endpoint process tests", () => {
   it("POST /api/v1/agents returns 200 and writes the expected database values", async () => {
     const { repo, stores } = createProcessRepo()
     setVoiceServiceForTests(createVoiceService(repo as never, liveKitAdapter))

@@ -61,6 +61,14 @@ export const upsertLiveKitConfigBody = t.Object({
   defaultSipOutboundTrunkId: t.Optional(t.String()),
 })
 
+export const upsertTwilioConfigBody = t.Object({
+  accountSid: t.String(),
+  authToken: t.String(),
+  defaultFromNumber: t.Optional(t.String()),
+  defaultWebhookBaseUrl: t.Optional(t.String()),
+  deleteTwilioRecordingAfterBlobUpload: t.Optional(t.Boolean()),
+})
+
 export const callStatus = t.Union([
   t.Literal("queued"),
   t.Literal("ringing"),
@@ -160,6 +168,27 @@ export const callResponse = t.Object({
   transcript: t.Optional(t.String()),
   recordingUrl: t.Optional(t.String()),
   analysis: t.Optional(t.Record(t.String(), t.Unknown())),
+  postCallStatus: t.Optional(
+    t.Union([
+      t.Literal("pending"),
+      t.Literal("processing"),
+      t.Literal("ready"),
+      t.Literal("failed"),
+    ])
+  ),
+  postCallWorkflowRunId: t.Optional(t.String()),
+  recordingIngestedAt: t.Optional(t.String()),
+  recordingDeletedFromTwilioAt: t.Optional(t.String()),
+  recordingIngestionError: t.Optional(t.String()),
+  analysisStatus: t.Optional(
+    t.Union([
+      t.Literal("pending"),
+      t.Literal("processing"),
+      t.Literal("ready"),
+      t.Literal("failed"),
+    ])
+  ),
+  analysisError: t.Optional(t.String()),
   events: t.Optional(
     t.Array(
       t.Object({

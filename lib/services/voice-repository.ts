@@ -8,9 +8,12 @@ import type {
   JsonCall,
   JsonCallEvent,
   JsonPhoneNumber,
+  JsonTranscriptItem,
   LiveKitCredentials,
   PaginatedList,
   RedactedLiveKitConfig,
+  RedactedTwilioConfig,
+  TwilioCredentials,
 } from "./voice-types"
 
 const DEFAULT_PAGE = 20
@@ -19,6 +22,7 @@ const MAX_PAGE = 100
 type AgentInsert = typeof schema.voiceAgent.$inferInsert
 type CallInsert = typeof schema.voiceCall.$inferInsert
 type PhoneInsert = typeof schema.voicePhoneNumber.$inferInsert
+type TranscriptInsert = typeof schema.voiceTranscriptItem.$inferInsert
 
 function now() {
   return new Date()
@@ -108,10 +112,30 @@ function toCall(
     livekitSipParticipantId: row.livekitSipParticipantId ?? undefined,
     livekitSipCallId: row.livekitSipCallId ?? undefined,
     livekitSipTrunkId: row.livekitSipTrunkId ?? undefined,
+    twilioCallSid: row.twilioCallSid ?? undefined,
+    twilioAccountSid: row.twilioAccountSid ?? undefined,
+    relaySessionId: row.relaySessionId ?? undefined,
+    recordingSid: row.recordingSid ?? undefined,
+    recordingStatus: row.recordingStatus ?? undefined,
+    recordingStorageKey: row.recordingStorageKey ?? undefined,
+    recordingStorageProvider: row.recordingStorageProvider ?? undefined,
+    recordingContentType: row.recordingContentType ?? undefined,
+    recordingSizeBytes: row.recordingSizeBytes ?? undefined,
+    postCallStatus: (row.postCallStatus as JsonCall["postCallStatus"]) ?? undefined,
+    postCallWorkflowRunId: row.postCallWorkflowRunId ?? undefined,
+    recordingIngestedAt: iso(row.recordingIngestedAt),
+    recordingDeletedFromTwilioAt: iso(row.recordingDeletedFromTwilioAt),
+    recordingIngestionError: row.recordingIngestionError ?? undefined,
+    analysisStatus: (row.analysisStatus as JsonCall["analysisStatus"]) ?? undefined,
+    analysisError: row.analysisError ?? undefined,
     providerSource: row.providerSource as JsonCall["providerSource"],
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   }
+}
+
+function toCallWithUser(row: typeof schema.voiceCall.$inferSelect) {
+  return { ...toCall(row), userId: row.userId }
 }
 
 function toPhone(row: typeof schema.voicePhoneNumber.$inferSelect): JsonPhoneNumber {
@@ -125,6 +149,8 @@ function toPhone(row: typeof schema.voicePhoneNumber.$inferSelect): JsonPhoneNum
     outboundAgentId: row.outboundAgentId ?? undefined,
     webhookUrl: row.webhookUrl ?? undefined,
     areaCode: row.areaCode ?? undefined,
+    twilioPhoneNumberSid: row.twilioPhoneNumberSid ?? undefined,
+    twilioAccountSid: row.twilioAccountSid ?? undefined,
     metadata: row.metadata ?? undefined,
     providerOptions: row.providerOptions ?? undefined,
     raw: row.raw ?? {},
@@ -133,12 +159,32 @@ function toPhone(row: typeof schema.voicePhoneNumber.$inferSelect): JsonPhoneNum
   }
 }
 
+function toPhoneWithUser(row: typeof schema.voicePhoneNumber.$inferSelect) {
+  return { ...toPhone(row), userId: row.userId }
+}
+
 function toEvent(row: typeof schema.voiceCallEvent.$inferSelect): JsonCallEvent {
   return {
     id: row.id,
     type: row.type,
     payload: row.payload ?? undefined,
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
+  }
+}
+
+function toTranscriptItem(
+  row: typeof schema.voiceTranscriptItem.$inferSelect
+): JsonTranscriptItem {
+  return {
+    id: row.id,
+    callId: row.callId,
+    role: row.role as JsonTranscriptItem["role"],
+    text: row.text,
+    status: row.status as JsonTranscriptItem["status"],
+    sequence: row.sequence,
+    raw: row.raw ?? undefined,
+    createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
+    updatedAt: iso(row.updatedAt),
   }
 }
 
@@ -252,6 +298,121 @@ export function createVoiceRepository() {
           apiKey: process.env.LIVEKIT_API_KEY,
           apiSecret: process.env.LIVEKIT_API_SECRET,
           defaultSipOutboundTrunkId: process.env.LIVEKIT_SIP_OUTBOUND_TRUNK_ID,
+          source: "platform",
+        }
+      }
+      return null
+    },
+
+    async getTwilioConfig(userId: string): Promise<RedactedTwilioConfig> {
+      const [row] = await db
+        .select()
+        .from(schema.twilioConfig)
+        .where(eq(schema.twilioConfig.userId, userId))
+        .limit(1)
+      if (row) {
+        const accountSid = decryptSecret(row.encryptedAccountSid)
+        return {
+          configured: true,
+          providerSource: "user",
+          accountSidPrefix: accountSid.slice(0, 8),
+          defaultFromNumber: row.defaultFromNumber ?? undefined,
+          defaultWebhookBaseUrl: row.defaultWebhookBaseUrl ?? undefined,
+          deleteTwilioRecordingAfterBlobUpload:
+            row.deleteTwilioRecordingAfterBlobUpload,
+          updatedAt: iso(row.updatedAt),
+        }
+      }
+      return {
+        configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+        providerSource:
+          process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+            ? "platform"
+            : "none",
+        accountSidPrefix: process.env.TWILIO_ACCOUNT_SID?.slice(0, 8),
+        defaultFromNumber: process.env.TWILIO_FROM_NUMBER,
+        defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
+        deleteTwilioRecordingAfterBlobUpload:
+          process.env.TWILIO_DELETE_RECORDING_AFTER_BLOB_UPLOAD === "true",
+      }
+    },
+
+    async upsertTwilioConfig(
+      userId: string,
+      input: {
+        accountSid: string
+        authToken: string
+        defaultFromNumber?: string
+        defaultWebhookBaseUrl?: string
+        deleteTwilioRecordingAfterBlobUpload?: boolean
+      }
+    ): Promise<RedactedTwilioConfig> {
+      const id = crypto.randomUUID()
+      const updatedAt = now()
+      await db
+        .insert(schema.twilioConfig)
+        .values({
+          id,
+          userId,
+          encryptedAccountSid: encryptSecret(input.accountSid),
+          encryptedAuthToken: encryptSecret(input.authToken),
+          defaultFromNumber: input.defaultFromNumber,
+          defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
+          deleteTwilioRecordingAfterBlobUpload:
+            input.deleteTwilioRecordingAfterBlobUpload ?? false,
+          createdAt: updatedAt,
+          updatedAt,
+        })
+        .onConflictDoUpdate({
+          target: schema.twilioConfig.userId,
+          set: {
+            encryptedAccountSid: encryptSecret(input.accountSid),
+            encryptedAuthToken: encryptSecret(input.authToken),
+            defaultFromNumber: input.defaultFromNumber,
+            defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
+            deleteTwilioRecordingAfterBlobUpload:
+              input.deleteTwilioRecordingAfterBlobUpload ?? false,
+            updatedAt,
+          },
+        })
+      return this.getTwilioConfig(userId)
+    },
+
+    async deleteTwilioConfig(userId: string): Promise<boolean> {
+      const rows = await db
+        .delete(schema.twilioConfig)
+        .where(eq(schema.twilioConfig.userId, userId))
+        .returning({ id: schema.twilioConfig.id })
+      return rows.length > 0
+    },
+
+    async resolveTwilioCredentials(
+      userId: string
+    ): Promise<TwilioCredentials | null> {
+      const [row] = await db
+        .select()
+        .from(schema.twilioConfig)
+        .where(eq(schema.twilioConfig.userId, userId))
+        .limit(1)
+      if (row) {
+        return {
+          accountSid: decryptSecret(row.encryptedAccountSid),
+          authToken: decryptSecret(row.encryptedAuthToken),
+          defaultFromNumber: row.defaultFromNumber ?? undefined,
+          defaultWebhookBaseUrl: row.defaultWebhookBaseUrl ?? undefined,
+          deleteTwilioRecordingAfterBlobUpload:
+            row.deleteTwilioRecordingAfterBlobUpload,
+          source: "user",
+        }
+      }
+      if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+        return {
+          accountSid: process.env.TWILIO_ACCOUNT_SID,
+          authToken: process.env.TWILIO_AUTH_TOKEN,
+          defaultFromNumber: process.env.TWILIO_FROM_NUMBER,
+          defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
+          deleteTwilioRecordingAfterBlobUpload:
+            process.env.TWILIO_DELETE_RECORDING_AFTER_BLOB_UPLOAD === "true",
           source: "platform",
         }
       }
@@ -380,6 +541,15 @@ export function createVoiceRepository() {
       )
     },
 
+    async findCallById(id: string) {
+      const [row] = await db
+        .select()
+        .from(schema.voiceCall)
+        .where(eq(schema.voiceCall.id, id))
+        .limit(1)
+      return row ? toCallWithUser(row) : null
+    },
+
     async updateCall(
       userId: string,
       id: string,
@@ -419,6 +589,40 @@ export function createVoiceRepository() {
         })
         .returning()
       return toEvent(row)
+    },
+
+    async addTranscriptItem(
+      userId: string,
+      input: Omit<TranscriptInsert, "id" | "userId" | "createdAt" | "updatedAt">
+    ): Promise<JsonTranscriptItem> {
+      const [row] = await db
+        .insert(schema.voiceTranscriptItem)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          ...input,
+          raw: input.raw ?? null,
+          createdAt: now(),
+          updatedAt: now(),
+        })
+        .returning()
+      return toTranscriptItem(row)
+    },
+
+    async listTranscriptItems(
+      userId: string,
+      callId: string
+    ): Promise<JsonTranscriptItem[]> {
+      const rows = await db
+        .select()
+        .from(schema.voiceTranscriptItem)
+        .where(
+          and(
+            eq(schema.voiceTranscriptItem.userId, userId),
+            eq(schema.voiceTranscriptItem.callId, callId)
+          )
+        )
+      return rows.map(toTranscriptItem).sort((a, b) => a.sequence - b.sequence)
     },
 
     async createPhoneNumber(
@@ -466,6 +670,15 @@ export function createVoiceRepository() {
         )
         .limit(1)
       return row ? toPhone(row) : null
+    },
+
+    async findPhoneNumberByNumber(number: string) {
+      const [row] = await db
+        .select()
+        .from(schema.voicePhoneNumber)
+        .where(eq(schema.voicePhoneNumber.number, number))
+        .limit(1)
+      return row ? toPhoneWithUser(row) : null
     },
 
     async updatePhoneNumber(

@@ -22,16 +22,17 @@ import {
 import type { LiveKitConfigResponse } from "@/lib/dashboard"
 
 type LiveKitFormValues = {
-  livekitUrl: string
-  apiKey: string
-  apiSecret: string
-  defaultSipOutboundTrunkId: string
+  accountSid: string
+  authToken: string
+  defaultFromNumber: string
+  defaultWebhookBaseUrl: string
+  deleteTwilioRecordingAfterBlobUpload: boolean
 }
 
 async function fetchConfig() {
-  const { data, error } = await api.v1["livekit-config"].get()
+  const { data, error } = await api.v1["twilio-config"].get()
   if (error) {
-    throw new Error(getApiErrorMessage(error, "Failed to load LiveKit config"))
+    throw new Error(getApiErrorMessage(error, "Failed to load Twilio config"))
   }
   return data as LiveKitConfigResponse
 }
@@ -45,35 +46,40 @@ export function LiveKitSettings() {
 
   const form = useForm<LiveKitFormValues>({
     defaultValues: {
-      livekitUrl: "",
-      apiKey: "",
-      apiSecret: "",
-      defaultSipOutboundTrunkId: "",
+      accountSid: "",
+      authToken: "",
+      defaultFromNumber: "",
+      defaultWebhookBaseUrl: "",
+      deleteTwilioRecordingAfterBlobUpload: false,
     },
   })
 
   const saveMutation = useMutation({
     mutationFn: async (values: LiveKitFormValues) => {
-      const { data, error } = await api.v1["livekit-config"].put({
-        livekitUrl: values.livekitUrl.trim(),
-        apiKey: values.apiKey.trim(),
-        apiSecret: values.apiSecret.trim(),
-        defaultSipOutboundTrunkId:
-          values.defaultSipOutboundTrunkId.trim() || undefined,
+      const { data, error } = await api.v1["twilio-config"].put({
+        accountSid: values.accountSid.trim(),
+        authToken: values.authToken.trim(),
+        defaultFromNumber: values.defaultFromNumber.trim() || undefined,
+        defaultWebhookBaseUrl:
+          values.defaultWebhookBaseUrl.trim() || undefined,
+        deleteTwilioRecordingAfterBlobUpload:
+          values.deleteTwilioRecordingAfterBlobUpload,
       })
       if (error) {
         throw new Error(
-          getApiErrorMessage(error, "Failed to save LiveKit config")
+          getApiErrorMessage(error, "Failed to save Twilio config")
         )
       }
       return data
     },
     onSuccess: async () => {
       form.reset({
-        livekitUrl: "",
-        apiKey: "",
-        apiSecret: "",
-        defaultSipOutboundTrunkId: "",
+        accountSid: "",
+        authToken: "",
+        defaultFromNumber: "",
+        defaultWebhookBaseUrl: "",
+        deleteTwilioRecordingAfterBlobUpload:
+          configQuery.data?.deleteTwilioRecordingAfterBlobUpload ?? false,
       })
       await queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.livekit(),
@@ -83,10 +89,10 @@ export function LiveKitSettings() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.v1["livekit-config"].test.post()
+      const { data, error } = await api.v1["twilio-config"].test.post()
       if (error) {
         throw new Error(
-          getApiErrorMessage(error, "Failed to test LiveKit config")
+          getApiErrorMessage(error, "Failed to test Twilio config")
         )
       }
       return data
@@ -95,10 +101,10 @@ export function LiveKitSettings() {
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await api.v1["livekit-config"].delete()
+      const { error } = await api.v1["twilio-config"].delete()
       if (error) {
         throw new Error(
-          getApiErrorMessage(error, "Failed to delete LiveKit config")
+          getApiErrorMessage(error, "Failed to delete Twilio config")
         )
       }
     },
@@ -112,15 +118,15 @@ export function LiveKitSettings() {
   return (
     <div className="space-y-8">
       <DashboardPageIntro
-        eyebrow="LiveKit"
+        eyebrow="Twilio"
         title="Store, test, and rotate your calling credentials."
-        description="Secrets are never returned from the API. This screen only renders redacted status while the form writes new encrypted credentials back through the existing endpoints."
+        description="Secrets are never returned from the API. This screen only renders redacted status while the form writes new encrypted credentials back through the relay endpoints."
       />
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <DashboardPanel
           title="Current status"
-          description="Redacted view from GET /api/v1/livekit-config."
+          description="Redacted view from GET /api/v1/twilio-config."
         >
           <InlineError message={configQuery.error?.message ?? null} />
           <div className="grid gap-4 sm:grid-cols-2">
@@ -133,19 +139,27 @@ export function LiveKitSettings() {
               value={configQuery.data?.providerSource ?? "none"}
             />
             <KeyValue
-              label="LiveKit URL"
-              value={configQuery.data?.livekitUrl ?? "—"}
+              label="Account SID prefix"
+              value={configQuery.data?.accountSidPrefix ?? "—"}
               mono
             />
             <KeyValue
-              label="API key prefix"
-              value={configQuery.data?.apiKeyPrefix ?? "—"}
+              label="Default from number"
+              value={configQuery.data?.defaultFromNumber ?? "—"}
               mono
             />
             <KeyValue
-              label="Default SIP trunk"
-              value={configQuery.data?.defaultSipOutboundTrunkId ?? "—"}
+              label="Webhook base URL"
+              value={configQuery.data?.defaultWebhookBaseUrl ?? "—"}
               mono
+            />
+            <KeyValue
+              label="Twilio recording copy"
+              value={
+                configQuery.data?.deleteTwilioRecordingAfterBlobUpload
+                  ? "Delete after Blob upload"
+                  : "Keep in Twilio"
+              }
             />
             <KeyValue
               label="Updated"
@@ -191,7 +205,7 @@ export function LiveKitSettings() {
 
         <DashboardPanel
           title="Save new credentials"
-          description="RHF-backed form wired to PUT /api/v1/livekit-config."
+          description="RHF-backed form wired to PUT /api/v1/twilio-config."
         >
           <form
             className="space-y-5"
@@ -202,16 +216,16 @@ export function LiveKitSettings() {
             <InlineError message={saveMutation.error?.message ?? null} />
 
             <div className="space-y-2">
-              <Label htmlFor="livekit-url">LiveKit URL</Label>
+              <Label htmlFor="twilio-account">Account SID</Label>
               <Controller
-                name="livekitUrl"
+                name="accountSid"
                 control={form.control}
-                rules={{ required: "LiveKit URL is required" }}
+                rules={{ required: "Account SID is required" }}
                 render={({ field, fieldState }) => (
                   <>
                     <Input
-                      id="livekit-url"
-                      placeholder="https://your-project.livekit.cloud"
+                      id="twilio-account"
+                      placeholder="AC..."
                       {...field}
                     />
                     {fieldState.error ? (
@@ -227,14 +241,15 @@ export function LiveKitSettings() {
               <div className="space-y-2">
                 <Label htmlFor="livekit-key">API key</Label>
                 <Controller
-                  name="apiKey"
+                  name="authToken"
                   control={form.control}
-                  rules={{ required: "API key is required" }}
+                  rules={{ required: "Auth token is required" }}
                   render={({ field, fieldState }) => (
                     <>
                       <Input
                         id="livekit-key"
-                        placeholder="lk_api_..."
+                        type="password"
+                        placeholder="Twilio auth token"
                         {...field}
                       />
                       {fieldState.error ? (
@@ -247,17 +262,15 @@ export function LiveKitSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="livekit-secret">API secret</Label>
+                <Label htmlFor="default-from">Default from number</Label>
                 <Controller
-                  name="apiSecret"
+                  name="defaultFromNumber"
                   control={form.control}
-                  rules={{ required: "API secret is required" }}
                   render={({ field, fieldState }) => (
                     <>
                       <Input
-                        id="livekit-secret"
-                        type="password"
-                        placeholder="Secret"
+                        id="default-from"
+                        placeholder="+15555550123"
                         {...field}
                       />
                       {fieldState.error ? (
@@ -271,17 +284,37 @@ export function LiveKitSettings() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="sip-trunk">Default outbound SIP trunk ID</Label>
+              <Label htmlFor="webhook-base">Default webhook base URL</Label>
               <Input
-                id="sip-trunk"
-                placeholder="trunk-1"
-                {...form.register("defaultSipOutboundTrunkId")}
+                id="webhook-base"
+                placeholder="https://your-app.example.com"
+                {...form.register("defaultWebhookBaseUrl")}
               />
             </div>
+            <label
+              htmlFor="delete-twilio-recording"
+              className="flex items-start gap-3 rounded-lg border border-border/70 bg-background/75 p-4 text-sm"
+            >
+              <input
+                id="delete-twilio-recording"
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-teal-600"
+                {...form.register("deleteTwilioRecordingAfterBlobUpload")}
+              />
+              <span>
+                <span className="block font-medium text-foreground">
+                  Delete Twilio recording after Blob upload
+                </span>
+                <span className="mt-1 block text-muted-foreground">
+                  The workflow verifies the private Blob copy before removing
+                  Twilio media.
+                </span>
+              </span>
+            </label>
 
             <Button type="submit" disabled={saveMutation.isPending}>
               <RiSaveLine />
-              {saveMutation.isPending ? "Saving…" : "Save LiveKit config"}
+              {saveMutation.isPending ? "Saving…" : "Save Twilio config"}
             </Button>
           </form>
         </DashboardPanel>

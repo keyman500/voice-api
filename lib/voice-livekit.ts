@@ -18,7 +18,7 @@ function serviceError(error: unknown, set: { status?: number | string }) {
  * Phase 1 voice resources — `voice-ai-sdk`–aligned names backed by Drizzle + LiveKit.
  * Mounted at `/api/v1/...` (Elysia app has prefix `/api`).
  */
-export const voiceV1 = new Elysia({ name: "voice-v1", prefix: "/v1" })
+export const voiceLiveKit = new Elysia({ name: "voice-livekit", prefix: "/v1" })
   .macro({
     authUser: {
       async resolve({ status, request: { headers } }) {

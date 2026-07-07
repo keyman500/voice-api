@@ -32,9 +32,9 @@ import type {
 } from "@/lib/dashboard"
 
 async function fetchOverviewLiveKit() {
-  const { data, error } = await api.v1["livekit-config"].get()
+  const { data, error } = await api.v1["twilio-config"].get()
   if (error) {
-    throw new Error(getApiErrorMessage(error, "Failed to load LiveKit config"))
+    throw new Error(getApiErrorMessage(error, "Failed to load Twilio config"))
   }
   return data as LiveKitConfigResponse
 }
@@ -81,7 +81,7 @@ export function OverviewDashboard() {
       <DashboardPageIntro
         eyebrow="Control room"
         title="Operational visibility across your voice stack."
-        description="Track readiness, launch outbound calls, inspect recent sessions, and jump into the exact surfaces that map to the LiveKit-backed API."
+        description="Track readiness, launch outbound calls, inspect recent sessions, and jump into the exact surfaces that map to the ConversationRelay API."
         action={
           <div className="flex flex-wrap gap-3">
             <Button render={<Link href="/dashboard/calls" />}>
@@ -92,7 +92,7 @@ export function OverviewDashboard() {
               variant="outline"
               render={<Link href="/dashboard/settings" />}
             >
-              LiveKit settings
+              Twilio settings
               <RiSettings3Line />
             </Button>
           </div>
@@ -109,12 +109,12 @@ export function OverviewDashboard() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="LiveKit"
+          label="Twilio"
           value={livekitQuery.data?.configured ? "Ready" : "Offline"}
           caption={
             livekitQuery.data?.configured
               ? `${livekitQuery.data.providerSource} credentials configured`
-              : "Set credentials before launching outbound SIP"
+              : "Set credentials before launching outbound calls"
           }
         />
         <MetricCard
@@ -134,7 +134,7 @@ export function OverviewDashboard() {
               ? formatDateTime(livekitQuery.data.updatedAt)
               : "—"
           }
-          caption="Redacted config status from /api/v1/livekit-config"
+          caption="Redacted config status from /api/v1/twilio-config"
         />
       </div>
 
@@ -194,12 +194,12 @@ export function OverviewDashboard() {
               </div>
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">
-                  LiveKit credentials
+                  Twilio credentials
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {livekitQuery.data?.configured
-                    ? `Connected to ${livekitQuery.data.livekitUrl ?? "configured project"}`
-                    : "Missing. Save credentials and optional SIP trunk under Settings."}
+                    ? `${livekitQuery.data.providerSource} credentials are configured.`
+                    : "Missing. Save credentials and optional webhook base URL under Settings."}
                 </p>
               </div>
             </div>

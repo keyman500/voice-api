@@ -47,6 +47,22 @@ export type JsonCall = {
   livekitSipParticipantId?: string
   livekitSipCallId?: string
   livekitSipTrunkId?: string
+  twilioCallSid?: string
+  twilioAccountSid?: string
+  relaySessionId?: string
+  recordingSid?: string
+  recordingStatus?: string
+  recordingStorageKey?: string
+  recordingStorageProvider?: string
+  recordingContentType?: string
+  recordingSizeBytes?: number
+  postCallStatus?: "pending" | "processing" | "ready" | "failed"
+  postCallWorkflowRunId?: string
+  recordingIngestedAt?: string
+  recordingDeletedFromTwilioAt?: string
+  recordingIngestionError?: string
+  analysisStatus?: "pending" | "processing" | "ready" | "failed"
+  analysisError?: string
   providerSource?: "user" | "platform"
   createdAt?: string
   updatedAt?: string
@@ -63,6 +79,8 @@ export type JsonPhoneNumber = {
   outboundAgentId?: string
   webhookUrl?: string
   areaCode?: string
+  twilioPhoneNumberSid?: string
+  twilioAccountSid?: string
   metadata?: Record<string, unknown>
   providerOptions?: Record<string, unknown>
   raw: unknown
@@ -83,6 +101,18 @@ export type JsonCallEvent = {
   createdAt: string
 }
 
+export type JsonTranscriptItem = {
+  id: string
+  callId: string
+  role: "user" | "assistant" | "system" | "tool"
+  text: string
+  status: "partial" | "final" | "interrupted"
+  sequence: number
+  raw?: Record<string, unknown>
+  createdAt: string
+  updatedAt?: string
+}
+
 export type RedactedLiveKitConfig = {
   configured: boolean
   providerSource: "user" | "platform" | "none"
@@ -92,10 +122,29 @@ export type RedactedLiveKitConfig = {
   updatedAt?: string
 }
 
+export type RedactedTwilioConfig = {
+  configured: boolean
+  providerSource: "user" | "platform" | "none"
+  accountSidPrefix?: string
+  defaultFromNumber?: string
+  defaultWebhookBaseUrl?: string
+  deleteTwilioRecordingAfterBlobUpload: boolean
+  updatedAt?: string
+}
+
 export type LiveKitCredentials = {
   url: string
   apiKey: string
   apiSecret: string
   defaultSipOutboundTrunkId?: string
+  source: "user" | "platform"
+}
+
+export type TwilioCredentials = {
+  accountSid: string
+  authToken: string
+  defaultFromNumber?: string
+  defaultWebhookBaseUrl?: string
+  deleteTwilioRecordingAfterBlobUpload: boolean
   source: "user" | "platform"
 }

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals"
+import { Elysia } from "elysia"
 import { VOICE_API_PROVIDER_ID } from "@/lib/voice-constants"
 
 jest.mock("@/lib/resolve-user")
@@ -7,7 +8,10 @@ const { resolveAuthedContext } = require("@/lib/resolve-user")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { setVoiceServiceForTests, VoiceServiceError } = require("@/lib/services")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { app } = require("@/lib/api")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { voiceLiveKit } = require("@/lib/voice-livekit")
+
+const app = new Elysia({ prefix: "/api" }).use(voiceLiveKit)
 
 const fakeUser = {
   id: "jest-user-1",
@@ -178,7 +182,7 @@ beforeEach(() => {
   setVoiceServiceForTests(createMockVoiceService())
 })
 
-describe("/api/v1 with mocked auth and voice service", () => {
+describe("parked LiveKit /api/v1 with mocked auth and voice service", () => {
   it("GET /api/v1/agents returns paginated list", async () => {
     const res = await handle("/api/v1/agents")
     expect(res.status).toBe(200)

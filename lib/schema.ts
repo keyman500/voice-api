@@ -132,6 +132,29 @@ export const livekitConfig = pgTable("livekit_config", {
     .notNull(),
 })
 
+export const twilioConfig = pgTable("twilio_config", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  encryptedAccountSid: text("encrypted_account_sid").notNull(),
+  encryptedAuthToken: text("encrypted_auth_token").notNull(),
+  defaultFromNumber: text("default_from_number"),
+  defaultWebhookBaseUrl: text("default_webhook_base_url"),
+  deleteTwilioRecordingAfterBlobUpload: boolean(
+    "delete_twilio_recording_after_blob_upload"
+  )
+    .default(false)
+    .notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+})
+
 export const voiceAgent = pgTable(
   "voice_agent",
   {
@@ -180,6 +203,22 @@ export const voiceCall = pgTable(
     livekitSipParticipantId: text("livekit_sip_participant_id"),
     livekitSipCallId: text("livekit_sip_call_id"),
     livekitSipTrunkId: text("livekit_sip_trunk_id"),
+    twilioCallSid: text("twilio_call_sid"),
+    twilioAccountSid: text("twilio_account_sid"),
+    relaySessionId: text("relay_session_id"),
+    recordingSid: text("recording_sid"),
+    recordingStatus: text("recording_status"),
+    recordingStorageKey: text("recording_storage_key"),
+    recordingStorageProvider: text("recording_storage_provider"),
+    recordingContentType: text("recording_content_type"),
+    recordingSizeBytes: integer("recording_size_bytes"),
+    postCallStatus: text("post_call_status"),
+    postCallWorkflowRunId: text("post_call_workflow_run_id"),
+    recordingIngestedAt: timestamp("recording_ingested_at"),
+    recordingDeletedFromTwilioAt: timestamp("recording_deleted_from_twilio_at"),
+    recordingIngestionError: text("recording_ingestion_error"),
+    analysisStatus: text("analysis_status"),
+    analysisError: text("analysis_error"),
     providerSource: text("provider_source").notNull().$defaultFn(() => "user"),
     startedAt: timestamp("started_at"),
     endedAt: timestamp("ended_at"),
@@ -223,6 +262,8 @@ export const voicePhoneNumber = pgTable(
     areaCode: text("area_code"),
     livekitSipInboundTrunkId: text("livekit_sip_inbound_trunk_id"),
     livekitSipOutboundTrunkId: text("livekit_sip_outbound_trunk_id"),
+    twilioPhoneNumberSid: text("twilio_phone_number_sid"),
+    twilioAccountSid: text("twilio_account_sid"),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
     providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
     raw: jsonb("raw").$type<Record<string, unknown> | null>(),
@@ -234,6 +275,34 @@ export const voicePhoneNumber = pgTable(
       .notNull(),
   },
   (table) => [index("voice_phone_number_user_id_idx").on(table.userId)]
+)
+
+export const voiceTranscriptItem = pgTable(
+  "voice_transcript_item",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    callId: text("call_id")
+      .notNull()
+      .references(() => voiceCall.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    text: text("text").notNull(),
+    status: text("status").notNull().$defaultFn(() => "final"),
+    sequence: integer("sequence").notNull(),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("voice_transcript_item_call_id_idx").on(table.callId),
+    index("voice_transcript_item_user_id_idx").on(table.userId),
+  ]
 )
 
 export const voiceCallEvent = pgTable(
