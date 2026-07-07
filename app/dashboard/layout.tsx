@@ -1,6 +1,8 @@
+import { headers } from "next/headers"
 import { Bricolage_Grotesque, IBM_Plex_Mono } from "next/font/google"
 
 import { DashboardShell } from "@/components/dashboard/dashboard-sidebar"
+import { auth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
 const dashboardBrand = Bricolage_Grotesque({
@@ -15,20 +17,24 @@ const dashboardMono = IBM_Plex_Mono({
   variable: "--font-dashboard-mono",
 })
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const session = await auth.api.getSession({ headers: await headers() })
+
   return (
     <div
       className={cn(
         dashboardBrand.variable,
         dashboardMono.variable,
-        "min-h-svh antialiased"
+        "h-svh overflow-hidden antialiased"
       )}
     >
-      <DashboardShell>{children}</DashboardShell>
+      <DashboardShell userEmail={session?.user.email ?? null}>
+        {children}
+      </DashboardShell>
     </div>
   )
 }

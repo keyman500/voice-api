@@ -81,6 +81,12 @@ function navItemActive(pathname: string, item: NavItem): boolean {
   return pathname === item.href || pathname.startsWith(`${item.href}/`)
 }
 
+function emailInitial(email: string): string {
+  const local = email.split("@")[0]?.trim()
+  if (!local) return "?"
+  return local.charAt(0).toUpperCase()
+}
+
 type DashboardSidebarProps = {
   className?: string
   onNavigate?: () => void
@@ -88,6 +94,7 @@ type DashboardSidebarProps = {
   collapsed: boolean
   onToggleCollapse: () => void
   collapseControlsReady: boolean
+  userEmail?: string | null
 }
 
 export function DashboardSidebar({
@@ -96,6 +103,7 @@ export function DashboardSidebar({
   collapsed,
   onToggleCollapse,
   collapseControlsReady,
+  userEmail,
 }: DashboardSidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -269,6 +277,36 @@ export function DashboardSidebar({
           "px-1.5 py-3 transition-[padding] duration-300"
         )}
       >
+        {userEmail ? (
+          <div
+            className={cn(
+              "flex items-center text-muted-foreground",
+              showLabels ? "gap-2.5 px-3 py-1.5" : "justify-center py-1.5"
+            )}
+            title={userEmail}
+          >
+            <span
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-lg border border-sidebar-border/80 bg-background/50 font-medium text-teal-600 dark:border-white/10 dark:bg-white/5 dark:text-teal-300",
+                showLabels ? "size-7 text-xs" : "size-9 text-sm"
+              )}
+              aria-hidden
+            >
+              {emailInitial(userEmail)}
+            </span>
+            <span
+              className={cn(
+                "min-w-0 truncate text-xs",
+                "transition-all duration-300 ease-out motion-reduce:transition-none",
+                showLabels
+                  ? "max-w-56 opacity-100"
+                  : "max-w-0 overflow-hidden opacity-0"
+              )}
+            >
+              {userEmail}
+            </span>
+          </div>
+        ) : null}
         {collapseControlsReady && (
           <div className="mb-1 hidden justify-center md:flex">
             <Button
@@ -347,9 +385,10 @@ export function DashboardSidebar({
 
 type DashboardShellProps = {
   children: React.ReactNode
+  userEmail?: string | null
 }
 
-export function DashboardShell({ children }: DashboardShellProps) {
+export function DashboardShell({ children, userEmail }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false
@@ -388,7 +427,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
   }
 
   return (
-    <div className="flex min-h-svh w-full min-w-0 flex-row overflow-x-hidden text-foreground">
+    <div className="flex h-svh w-full min-w-0 flex-row overflow-hidden text-foreground">
       {mobileOpen && (
         <button
           type="button"
@@ -430,12 +469,13 @@ export function DashboardShell({ children }: DashboardShellProps) {
           collapsed={false}
           onToggleCollapse={toggleSidebarCollapse}
           collapseControlsReady={false}
+          userEmail={userEmail}
         />
       </aside>
 
       <aside
         className={cn(
-          "relative z-0 hidden h-svh shrink-0 flex-col overflow-hidden",
+          "relative z-0 hidden h-full shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar",
           "shadow-md dark:shadow-none",
           "md:flex",
@@ -450,10 +490,11 @@ export function DashboardShell({ children }: DashboardShellProps) {
           collapsed={effectiveCollapsed}
           onToggleCollapse={toggleSidebarCollapse}
           collapseControlsReady={collapseControlsReady}
+          userEmail={userEmail}
         />
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col md:min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border/60 bg-background/80 px-4 backdrop-blur-md md:hidden">
           <Button
             type="button"
@@ -476,13 +517,13 @@ export function DashboardShell({ children }: DashboardShellProps) {
         </header>
         <main
           className={cn(
-            "min-h-0 flex-1 transition-[background-color] duration-300",
+            "min-h-0 flex-1 overflow-y-auto transition-[background-color] duration-300",
             "bg-zinc-50/90 bg-[radial-gradient(ellipse_90%_60%_at_100%_0%,rgb(6_182_212/0.22)_0%,transparent_50%)]",
             "dark:bg-zinc-950/90 dark:bg-[radial-gradient(ellipse_90%_60%_at_100%_0%,rgb(34_120_100/0.18)_0%,transparent_50%)]"
           )}
         >
           <div
-            className="h-full min-h-[calc(100dvh-3.5rem)] md:min-h-svh"
+            className="min-h-full"
             style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='0.04'/%3E%3C/svg%3E")`,
             }}

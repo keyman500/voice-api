@@ -8,6 +8,7 @@ import type {
 export const dashboardQueryKeys = {
   agentsRoot: () => ["agents"] as const,
   livekit: () => ["twilio-config"] as const,
+  apiKeys: () => ["api-keys"] as const,
   agents: (limit = 100) => ["agents", limit] as const,
   callsRoot: () => ["calls"] as const,
   calls: (filters: Record<string, unknown> = {}) => ["calls", filters] as const,

@@ -76,7 +76,7 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
             error: {
               code: "UNAUTHORIZED",
               message:
-                "Sign in (session) or pass Authorization: Bearer <api_key>",
+                "Sign in with a session cookie, pass Authorization: Bearer <api_key>, or pass x-api-key: <api_key>",
             },
           } as const)
         }
@@ -239,7 +239,16 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         callStatus: query.callStatus,
         callSuccessful: query.callSuccessful,
       }),
-    { authUser: true, query: s.listCallsQuery, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      query: s.listCallsQuery,
+      detail: {
+        summary: "List call logs",
+        description:
+          "Returns paginated call history records for the authenticated user. This powers the dashboard logs table.",
+        tags: ["Calls", "Logs"],
+      },
+    }
   )
   .get(
     "/calls/:id",
@@ -251,7 +260,16 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
       return call
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      params: s.idParam,
+      detail: {
+        summary: "Get call log detail",
+        description:
+          "Returns one call record with transcript, event history, recording status, and post-call analysis fields.",
+        tags: ["Calls", "Logs"],
+      },
+    }
   )
   .post(
     "/calls",
@@ -268,7 +286,14 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         return serviceError(error, set)
       }
     },
-    { authUser: true, body: s.createCallBody, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      body: s.createCallBody,
+      detail: {
+        summary: "Create outbound call",
+        tags: ["Calls"],
+      },
+    }
   )
   .patch(
     "/calls/:id",
@@ -301,7 +326,14 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
       return { ok: true as const }
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      params: s.idParam,
+      detail: {
+        summary: "Delete call log",
+        tags: ["Calls", "Logs"],
+      },
+    }
   )
   .get(
     "/calls/:id/recording",
@@ -321,7 +353,16 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         return serviceError(error, set)
       }
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      params: s.idParam,
+      detail: {
+        summary: "Download call recording",
+        description:
+          "Streams the private Blob-backed recording for an authenticated call log once post-call ingestion is ready.",
+        tags: ["Calls", "Logs"],
+      },
+    }
   )
   .post(
     "/calls/:id/post-call/retry",
@@ -349,7 +390,16 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         return serviceError(error, set)
       }
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Calls"] } }
+    {
+      authUser: true,
+      params: s.idParam,
+      detail: {
+        summary: "Retry post-call processing",
+        description:
+          "Restarts recording ingestion, analysis, success evaluation, and finished-call webhook delivery for a call.",
+        tags: ["Calls", "Logs"],
+      },
+    }
   )
 
   .get(
