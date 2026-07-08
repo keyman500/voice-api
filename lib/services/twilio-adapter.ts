@@ -31,6 +31,16 @@ export type TwilioRecordingMedia = {
   size?: number
 }
 
+export type TwilioIncomingPhoneNumber = {
+  sid: string
+  accountSid?: string
+  phoneNumber: string
+  friendlyName?: string
+  voiceUrl?: string
+  voiceMethod?: string
+  raw: unknown
+}
+
 export type ConversationRelayOptions = {
   websocketUrl: string
   welcomeGreeting?: string
@@ -64,6 +74,13 @@ export type TwilioAdapter = {
     credentials: TwilioCredentials,
     recordingSid: string
   ): Promise<void>
+  listIncomingPhoneNumbers(
+    credentials: TwilioCredentials
+  ): Promise<TwilioIncomingPhoneNumber[]>
+  updateIncomingPhoneNumberWebhook(
+    credentials: TwilioCredentials,
+    input: { sid: string; voiceUrl: string; voiceMethod?: "GET" | "POST" }
+  ): Promise<TwilioIncomingPhoneNumber>
   validateSignature(input: {
     authToken: string
     url: string
@@ -258,6 +275,80 @@ export const twilioAdapter: TwilioAdapter = {
     )
     if (!res.ok && res.status !== 404) {
       throw new Error(`Twilio recording delete failed with status ${res.status}`)
+    }
+  },
+
+  async listIncomingPhoneNumbers(credentials) {
+    const raw = await twilioJson(credentials, "/IncomingPhoneNumbers.json")
+    const list = Array.isArray(
+      (raw as { incoming_phone_numbers?: unknown }).incoming_phone_numbers
+    )
+      ? (raw as { incoming_phone_numbers: unknown[] }).incoming_phone_numbers
+      : []
+    return list
+      .map((item) => {
+        const record = item as Record<string, unknown>
+        return {
+          sid: String(record.sid ?? ""),
+          accountSid:
+            typeof record.account_sid === "string"
+              ? record.account_sid
+              : undefined,
+          phoneNumber:
+            typeof record.phone_number === "string"
+              ? record.phone_number
+              : "",
+          friendlyName:
+            typeof record.friendly_name === "string"
+              ? record.friendly_name
+              : undefined,
+          voiceUrl:
+            typeof record.voice_url === "string"
+              ? record.voice_url
+              : undefined,
+          voiceMethod:
+            typeof record.voice_method === "string"
+              ? record.voice_method
+              : undefined,
+          raw: item,
+        }
+      })
+      .filter((item) => item.sid && item.phoneNumber)
+  },
+
+  async updateIncomingPhoneNumberWebhook(credentials, input) {
+    const raw = await twilioJson(
+      credentials,
+      `/IncomingPhoneNumbers/${input.sid}.json`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: formBody({
+          VoiceUrl: input.voiceUrl,
+          VoiceMethod: input.voiceMethod ?? "POST",
+        }),
+      }
+    )
+    const record = raw as Record<string, unknown>
+    return {
+      sid: typeof record.sid === "string" ? record.sid : input.sid,
+      accountSid:
+        typeof record.account_sid === "string" ? record.account_sid : undefined,
+      phoneNumber:
+        typeof record.phone_number === "string" ? record.phone_number : "",
+      friendlyName:
+        typeof record.friendly_name === "string"
+          ? record.friendly_name
+          : undefined,
+      voiceUrl:
+        typeof record.voice_url === "string" ? record.voice_url : undefined,
+      voiceMethod:
+        typeof record.voice_method === "string"
+          ? record.voice_method
+          : undefined,
+      raw,
     }
   },
 

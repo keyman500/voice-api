@@ -28,6 +28,7 @@ export type JsonCall = {
   id: string
   provider: typeof VOICE_API_PROVIDER_ID
   agentId?: string
+  phoneNumberId?: string
   toNumber?: string
   fromNumber?: string
   status:

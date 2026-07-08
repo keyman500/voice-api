@@ -84,6 +84,7 @@ export const callStatus = t.Union([
 
 export const createCallBody = t.Object({
   agentId: t.Optional(t.String()),
+  phoneNumberId: t.Optional(t.String()),
   toNumber: t.String(),
   fromNumber: t.Optional(t.String()),
   metadata: optionalRecordUnknown,
@@ -167,6 +168,7 @@ export const callResponse = t.Object({
   id: t.String(),
   provider: t.String(),
   agentId: t.Optional(t.String()),
+  phoneNumberId: t.Optional(t.String()),
   toNumber: t.Optional(t.String()),
   fromNumber: t.Optional(t.String()),
   status: callStatus,
@@ -251,6 +253,9 @@ export const phoneNumberResponse = t.Object({
   outboundAgentId: t.Optional(t.String()),
   webhookUrl: t.Optional(t.String()),
   areaCode: t.Optional(t.String()),
+  twilioPhoneNumberSid: t.Optional(t.String()),
+  twilioAccountSid: t.Optional(t.String()),
   metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+  providerOptions: t.Optional(t.Record(t.String(), t.Unknown())),
   raw: t.Unknown(),
 })

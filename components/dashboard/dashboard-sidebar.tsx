@@ -12,6 +12,7 @@ import {
   RiLayoutGridLine,
   RiLogoutBoxRLine,
   RiMenuLine,
+  RiNumbersLine,
   RiPhoneLine,
   RiRobot2Line,
   RiSettings3Line,
@@ -57,6 +58,13 @@ const mainNav: NavItem[] = [
     href: "/dashboard/calls",
     label: "Calls",
     icon: RiPhoneLine,
+    match: "prefix",
+  },
+  {
+    kind: "link",
+    href: "/dashboard/phone-numbers",
+    label: "Numbers",
+    icon: RiNumbersLine,
     match: "prefix",
   },
   {

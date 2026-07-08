@@ -15,6 +15,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/eden"
 import {
@@ -22,7 +29,6 @@ import {
   formatDateTime,
   getApiErrorMessage,
   parseJsonRecordInput,
-  stringifyJson,
 } from "@/lib/dashboard"
 import {
   DashboardPageIntro,
@@ -33,12 +39,13 @@ import {
   TimestampLine,
 } from "@/components/dashboard/control-room-ui"
 import type { AgentListResponse } from "@/lib/dashboard"
-import type { JsonCall } from "@/lib/services/voice-types"
+import type { JsonCall, JsonPhoneNumber } from "@/lib/services/voice-types"
 
 type CallFormValues = {
   toNumber: string
   fromNumber: string
   agentId: string
+  phoneNumberId: string
   metadata: string
   providerOptions: string
 }
@@ -53,6 +60,18 @@ async function fetchAgentsForDialer() {
   return data as AgentListResponse
 }
 
+async function fetchPhoneNumbersForDialer() {
+  const { data, error } = await api.v1["phone-numbers"].get({
+    query: { limit: 100 },
+  })
+  if (error) {
+    throw new Error(
+      getApiErrorMessage(error, "Failed to load phone numbers for the dialer")
+    )
+  }
+  return data as { items: JsonPhoneNumber[]; hasMore: boolean }
+}
+
 export function OutboundCallsPanel() {
   const queryClient = useQueryClient()
   const [lastCall, setLastCall] = useState<JsonCall | null>(null)
@@ -61,6 +80,7 @@ export function OutboundCallsPanel() {
       toNumber: "",
       fromNumber: "",
       agentId: "",
+      phoneNumberId: "",
       metadata: "",
       providerOptions: "",
     },
@@ -70,13 +90,18 @@ export function OutboundCallsPanel() {
     queryKey: dashboardQueryKeys.agents(),
     queryFn: fetchAgentsForDialer,
   })
+  const phoneNumbersQuery = useQuery({
+    queryKey: dashboardQueryKeys.phoneNumbers(),
+    queryFn: fetchPhoneNumbersForDialer,
+  })
 
   const callMutation = useMutation({
     mutationFn: async (values: CallFormValues) => {
       const { data, error } = await api.v1.calls.post({
         toNumber: values.toNumber.trim(),
+        phoneNumberId: values.phoneNumberId.trim() || undefined,
         fromNumber: values.fromNumber.trim() || undefined,
-        agentId: values.agentId.trim() || undefined,
+        agentId: values.agentId.trim(),
         metadata: parseJsonRecordInput(values.metadata, "Metadata"),
         providerOptions: parseJsonRecordInput(
           values.providerOptions,
@@ -104,7 +129,7 @@ export function OutboundCallsPanel() {
       <DashboardPageIntro
         eyebrow="Calls"
         title="Launch outbound traffic without leaving the control room."
-        description="This page is intentionally focused on origination only. Compose a call, choose an agent if needed, and send directly into the LiveKit-backed calls API."
+        description="Compose a call, choose the agent explicitly, and select an imported Twilio number as the outbound caller ID."
         action={
           <Button variant="outline" render={<Link href="/dashboard/logs" />}>
             Open logs
@@ -124,6 +149,13 @@ export function OutboundCallsPanel() {
             )}
           >
             <InlineError message={callMutation.error?.message ?? null} />
+            <InlineError
+              message={
+                agentsQuery.error?.message ??
+                phoneNumbersQuery.error?.message ??
+                null
+              }
+            />
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
@@ -141,35 +173,77 @@ export function OutboundCallsPanel() {
                   </p>
                 ) : null}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="from-number">From number</Label>
-                <Input
-                  id="from-number"
-                  placeholder="+15557654321"
-                  {...form.register("fromNumber")}
-                />
-              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="agent-id">Agent ID</Label>
-              <Input
-                id="agent-id"
-                list="agent-id-options"
-                placeholder="Optional agent id"
-                {...form.register("agentId")}
-              />
-              <datalist id="agent-id-options">
-                {(agentsQuery.data?.items ?? []).map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name ?? agent.id}
-                  </option>
-                ))}
-              </datalist>
-              <p className="text-xs text-muted-foreground">
-                Leave blank to place a raw outbound call without an attached
-                agent record.
-              </p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="agent-id">Agent</Label>
+                <Controller
+                  name="agentId"
+                  control={form.control}
+                  rules={{ required: "Agent is required" }}
+                  render={({ field, fieldState }) => (
+                    <>
+                      <Select
+                        value={field.value || "none"}
+                        onValueChange={(value) => {
+                          const next = value ?? "none"
+                          field.onChange(next === "none" ? "" : next)
+                        }}
+                      >
+                        <SelectTrigger id="agent-id" className="w-full">
+                          <SelectValue placeholder="Select agent" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select agent</SelectItem>
+                          {(agentsQuery.data?.items ?? []).map((agent) => (
+                            <SelectItem key={agent.id} value={agent.id}>
+                              {agent.name ?? agent.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {fieldState.error ? (
+                        <p className="text-xs text-destructive">
+                          {fieldState.error.message}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone-number-id">Caller ID</Label>
+                <Controller
+                  name="phoneNumberId"
+                  control={form.control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || "default"}
+                      onValueChange={(value) => {
+                        const next = value ?? "default"
+                        field.onChange(next === "default" ? "" : next)
+                      }}
+                    >
+                      <SelectTrigger id="phone-number-id" className="w-full">
+                        <SelectValue placeholder="Select phone number" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">
+                          Twilio default caller ID
+                        </SelectItem>
+                        {(phoneNumbersQuery.data?.items ?? []).map((phone) => (
+                          <SelectItem key={phone.id} value={phone.id}>
+                            {phone.name
+                              ? `${phone.name} (${phone.number})`
+                              : (phone.number ?? phone.id)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
             </div>
 
             <Accordion>
@@ -177,6 +251,19 @@ export function OutboundCallsPanel() {
                 <AccordionTrigger>Advanced payload</AccordionTrigger>
                 <AccordionContent>
                   <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="from-number">
+                        Raw from number override
+                      </Label>
+                      <Input
+                        id="from-number"
+                        placeholder="+15557654321"
+                        {...form.register("fromNumber")}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Used only when no saved caller ID is selected.
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="call-metadata">Metadata JSON</Label>
                       <Controller
@@ -286,13 +373,13 @@ export function OutboundCallsPanel() {
                     value={lastCall.providerSource ?? "—"}
                   />
                   <KeyValue
-                    label="Room name"
-                    value={lastCall.roomName ?? "—"}
+                    label="From number"
+                    value={lastCall.fromNumber ?? "—"}
                     mono
                   />
                   <KeyValue
-                    label="SIP call ID"
-                    value={lastCall.livekitSipCallId ?? "—"}
+                    label="Phone number ID"
+                    value={lastCall.phoneNumberId ?? "—"}
                     mono
                   />
                 </div>
@@ -324,8 +411,8 @@ export function OutboundCallsPanel() {
             </div>
           ) : (
             <div className="rounded-[1.5rem] border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
-              Submit an outbound call to see its returned LiveKit identifiers
-              and payload snapshot here.
+              Submit an outbound call to see its Twilio identifiers and payload
+              snapshot here.
             </div>
           )}
         </DashboardPanel>

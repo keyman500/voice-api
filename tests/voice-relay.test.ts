@@ -50,6 +50,7 @@ function createMockRelayService() {
   let twilioConfigured = false
   const agents = new Map<string, Record<string, unknown>>()
   const calls = new Map<string, Record<string, unknown>>()
+  const phoneNumbers = new Map<string, Record<string, unknown>>()
 
   return {
     getTwilioConfig: jest.fn(async () => ({
@@ -133,6 +134,7 @@ function createMockRelayService() {
         id: "call-1",
         provider: VOICE_API_PROVIDER_ID,
         agentId: input.agentId,
+        phoneNumberId: input.phoneNumberId,
         toNumber: input.toNumber,
         fromNumber: input.fromNumber ?? "+15555550123",
         status: "ringing",
@@ -160,7 +162,29 @@ function createMockRelayService() {
       const bytes = new TextEncoder().encode("audio bytes")
       return new File([bytes], "recording.mp3", { type: "audio/mpeg" })
     }),
-    listPhoneNumbers: jest.fn(async () => ({ items: [], hasMore: false })),
+    listPhoneNumbers: jest.fn(async () => ({
+      items: Array.from(phoneNumbers.values()),
+      hasMore: false,
+    })),
+    importPhoneNumbers: jest.fn(async (_userId: string) => {
+      const phone = {
+        id: "phone-1",
+        provider: VOICE_API_PROVIDER_ID,
+        number: "+15555550123",
+        name: "Support",
+        twilioPhoneNumberSid: "PN123",
+        twilioAccountSid: "AC123",
+        providerOptions: {
+          webhook: {
+            status: "configured",
+            voiceUrl: "https://voice.example.com/api/v1/twilio/voice",
+          },
+        },
+        raw: {},
+      }
+      phoneNumbers.set(phone.id, phone)
+      return { items: [phone], hasMore: false, imported: 1 }
+    }),
     getPhoneNumber: jest.fn(async () => null),
     createPhoneNumber: jest.fn(async (_userId: string, input: Record<string, unknown>) => ({
       id: "phone-1",
@@ -244,6 +268,72 @@ describe("/api/v1 relay routes", () => {
       twilioCallSid: "CA123",
       twilioAccountSid: "AC123",
     })
+  })
+
+  it("POST /api/v1/calls forwards phoneNumberId with explicit agent", async () => {
+    const service = createMockRelayService()
+    setVoiceRelayServiceForTests(service as never)
+    await handle("/api/v1/twilio-config", {
+      method: "PUT",
+      body: JSON.stringify({
+        accountSid: "AC123456789",
+        authToken: "secret-token",
+      }),
+    })
+
+    const res = await handle("/api/v1/calls", {
+      method: "POST",
+      body: JSON.stringify({
+        agentId: "agent-1",
+        phoneNumberId: "phone-1",
+        toNumber: "+15555550100",
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      agentId: "agent-1",
+      phoneNumberId: "phone-1",
+    })
+    expect(service.createCall).toHaveBeenCalledWith(
+      fakeUser.id,
+      expect.objectContaining({
+        agentId: "agent-1",
+        phoneNumberId: "phone-1",
+      })
+    )
+  })
+
+  it("POST /api/v1/phone-numbers/import requires auth", async () => {
+    jest.mocked(resolveAuthedContext).mockResolvedValue(null)
+
+    const res = await handle("/api/v1/phone-numbers/import", {
+      method: "POST",
+    })
+
+    expect(res.status).toBe(401)
+  })
+
+  it("POST /api/v1/phone-numbers/import returns imported Twilio numbers", async () => {
+    const service = createMockRelayService()
+    setVoiceRelayServiceForTests(service as never)
+
+    const res = await handle("/api/v1/phone-numbers/import", {
+      method: "POST",
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      imported: 1,
+      items: [
+        expect.objectContaining({
+          id: "phone-1",
+          number: "+15555550123",
+          twilioPhoneNumberSid: "PN123",
+        }),
+      ],
+    })
+    expect(service.importPhoneNumbers).toHaveBeenCalledWith(fakeUser.id)
   })
 
   it("POST /api/v1/agents accepts success evaluation and redacts webhook secret", async () => {

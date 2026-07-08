@@ -9,6 +9,8 @@ export const dashboardQueryKeys = {
   agentsRoot: () => ["agents"] as const,
   livekit: () => ["twilio-config"] as const,
   apiKeys: () => ["api-keys"] as const,
+  phoneNumbersRoot: () => ["phone-numbers"] as const,
+  phoneNumbers: (limit = 100) => ["phone-numbers", limit] as const,
   agents: (limit = 100) => ["agents", limit] as const,
   callsRoot: () => ["calls"] as const,
   calls: (filters: Record<string, unknown> = {}) => ["calls", filters] as const,
@@ -17,6 +19,9 @@ export const dashboardQueryKeys = {
 
 export type AgentListResponse = PaginatedList<JsonAgent>
 export type CallListResponse = PaginatedList<JsonCall>
+export type PhoneNumberListResponse = PaginatedList<
+  import("@/lib/services/voice-types").JsonPhoneNumber
+>
 export type LiveKitConfigResponse = RedactedTwilioConfig
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -105,6 +105,7 @@ function toCall(
     id: row.id,
     provider: VOICE_API_PROVIDER_ID,
     agentId: row.agentId ?? undefined,
+    phoneNumberId: row.phoneNumberId ?? undefined,
     toNumber: row.toNumber ?? undefined,
     fromNumber: row.fromNumber ?? undefined,
     status: row.status as JsonCall["status"],

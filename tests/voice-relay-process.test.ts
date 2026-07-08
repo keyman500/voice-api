@@ -203,6 +203,29 @@ function createTwilioMock() {
       size: 11,
     })),
     deleteRecording: jest.fn(async (_credentials: unknown, _recordingSid: unknown) => undefined),
+    listIncomingPhoneNumbers: jest.fn(async () => [
+      {
+        sid: "PN123",
+        accountSid: "AC123456789",
+        phoneNumber: "+15555550123",
+        friendlyName: "Support",
+        raw: { sid: "PN123", phone_number: "+15555550123" },
+      },
+    ]),
+    updateIncomingPhoneNumberWebhook: jest.fn(
+      async (
+        _credentials: unknown,
+        input: { sid: string; voiceUrl: string; voiceMethod?: string }
+      ) => ({
+        sid: input.sid,
+        accountSid: "AC123456789",
+        phoneNumber: "+15555550123",
+        friendlyName: "Support",
+        voiceUrl: input.voiceUrl,
+        voiceMethod: "POST",
+        raw: { sid: input.sid, voice_url: input.voiceUrl },
+      })
+    ),
   }
 }
 
@@ -332,6 +355,148 @@ describe("voice relay service process behavior", () => {
     )
   })
 
+  it("imports Twilio incoming numbers and configures voice webhooks", async () => {
+    const { repo, stores } = createProcessRepo()
+    const twilio = createTwilioMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+
+    const result = await service.importPhoneNumbers(fakeUser.id)
+
+    expect(result.imported).toBe(1)
+    expect(twilio.listIncomingPhoneNumbers).toHaveBeenCalled()
+    expect(twilio.updateIncomingPhoneNumberWebhook).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        sid: "PN123",
+        voiceUrl: "https://voice.example.com/api/v1/twilio/voice",
+        voiceMethod: "POST",
+      }
+    )
+    expect(Array.from(stores.phones.values())[0]).toMatchObject({
+      number: "+15555550123",
+      twilioPhoneNumberSid: "PN123",
+      webhookUrl: "https://voice.example.com/api/v1/twilio/voice",
+    })
+  })
+
+  it("returns a clear error when Twilio number import fails without deleting local numbers", async () => {
+    const { repo, stores } = createProcessRepo()
+    const twilio = createTwilioMock()
+    twilio.listIncomingPhoneNumbers.mockImplementationOnce(async () => {
+      throw new Error("Twilio unavailable")
+    })
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+    await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550999",
+      name: "Existing",
+    })
+
+    await expect(service.importPhoneNumbers(fakeUser.id)).rejects.toMatchObject({
+      code: "TWILIO_PHONE_NUMBER_IMPORT_FAILED",
+      status: 502,
+      message: "Twilio unavailable",
+    })
+    expect(Array.from(stores.phones.values())).toEqual([
+      expect.objectContaining({
+        name: "Existing",
+        number: "+15555550999",
+      }),
+    ])
+  })
+
+  it("outbound calls with phoneNumberId resolve caller ID from the saved number", async () => {
+    const { repo, stores } = createProcessRepo()
+    const twilio = createTwilioMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550999",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+    await service.createAgent(fakeUser.id, { name: "Agent" })
+    const phone = await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550123",
+      inboundAgentId: "agent-1",
+    })
+
+    const call = await service.createCall(fakeUser.id, {
+      agentId: "agent-1",
+      phoneNumberId: phone.id,
+      toNumber: "+15555550100",
+      fromNumber: "+15555550000",
+    })
+
+    expect(twilio.createCall as jest.Mock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        to: "+15555550100",
+        from: "+15555550123",
+      })
+    )
+    expect(stores.calls.get(String(call.id))).toMatchObject({
+      phoneNumberId: phone.id,
+      fromNumber: "+15555550123",
+    })
+  })
+
+  it("outbound calls with phoneNumberId require an explicit agent", async () => {
+    const { repo } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+    const phone = await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550123",
+    })
+
+    await expect(
+      service.createCall(fakeUser.id, {
+        phoneNumberId: phone.id,
+        toNumber: "+15555550100",
+      })
+    ).rejects.toMatchObject({
+      code: "AGENT_REQUIRED",
+      status: 400,
+    })
+  })
+
   it("inbound voice webhook rejects invalid Twilio signatures", async () => {
     const { repo } = createProcessRepo()
     const twilio = createTwilioMock()
@@ -448,6 +613,49 @@ describe("voice relay service process behavior", () => {
     expect(stores.events.get(String(call.id))).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "twilio.voice.answered" }),
+      ])
+    )
+  })
+
+  it("inbound voice webhook returns friendly TwiML when no inbound agent is attached", async () => {
+    const { repo, stores } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+    await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550123",
+    })
+
+    const twiml = await service.handleVoiceWebhook({
+      url: "https://voice.example.com/api/v1/twilio/voice",
+      signature: "valid",
+      params: {
+        To: "+15555550123",
+        From: "+15555550100",
+        CallSid: "CA123",
+        AccountSid: "AC123456789",
+      },
+    })
+
+    expect(twiml).toContain("not configured yet")
+    expect(Array.from(stores.calls.values())[0]).toMatchObject({
+      direction: "inbound",
+      status: "error",
+      phoneNumberId: "phone-1",
+    })
+    const createdCall = Array.from(stores.calls.values())[0]
+    expect(stores.events.get(String(createdCall.id))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "twilio.voice.unconfigured" }),
       ])
     )
   })

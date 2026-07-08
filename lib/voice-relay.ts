@@ -277,6 +277,7 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       try {
         return await getVoiceRelayService().createCall(authed.user.id, {
           agentId: body.agentId,
+          phoneNumberId: body.phoneNumberId,
           toNumber: body.toNumber,
           fromNumber: body.fromNumber,
           metadata: body.metadata,
@@ -413,6 +414,25 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       authUser: true,
       query: s.listPhoneNumbersQuery,
       detail: { tags: ["Phone numbers"] },
+    }
+  )
+  .post(
+    "/phone-numbers/import",
+    async ({ authed, set }) => {
+      try {
+        return await getVoiceRelayService().importPhoneNumbers(authed.user.id)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      detail: {
+        summary: "Import Twilio phone numbers",
+        description:
+          "Imports owned Twilio incoming phone numbers and configures each number to route inbound calls to the ConversationRelay webhook.",
+        tags: ["Phone numbers"],
+      },
     }
   )
   .get(

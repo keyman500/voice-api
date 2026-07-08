@@ -316,6 +316,7 @@ export function createVoiceRelayService(
       userId: string,
       input: {
         agentId?: string
+        phoneNumberId?: string
         toNumber: string
         fromNumber?: string
         metadata?: RecordInput
@@ -328,6 +329,30 @@ export function createVoiceRelayService(
       if (input.agentId && !agent) {
         throw new VoiceServiceError(400, "AGENT_NOT_FOUND", "agentId not found")
       }
+      const phone = input.phoneNumberId
+        ? await repo.getPhoneNumber(userId, input.phoneNumberId)
+        : null
+      if (input.phoneNumberId && !phone) {
+        throw new VoiceServiceError(
+          400,
+          "PHONE_NUMBER_NOT_FOUND",
+          "phoneNumberId not found"
+        )
+      }
+      if (input.phoneNumberId && !input.agentId) {
+        throw new VoiceServiceError(
+          400,
+          "AGENT_REQUIRED",
+          "agentId is required when phoneNumberId is used"
+        )
+      }
+      if (input.phoneNumberId && !phone?.number) {
+        throw new VoiceServiceError(
+          400,
+          "PHONE_NUMBER_VALUE_MISSING",
+          "Selected phone number does not have a callable number"
+        )
+      }
       const credentials = await repo.resolveTwilioCredentials(userId)
       if (!credentials) {
         throw new VoiceServiceError(
@@ -336,7 +361,7 @@ export function createVoiceRelayService(
           "No user Twilio config or platform Twilio fallback is configured"
         )
       }
-      const fromNumber = input.fromNumber ?? credentials.defaultFromNumber
+      const fromNumber = phone?.number ?? input.fromNumber ?? credentials.defaultFromNumber
       if (!fromNumber) {
         throw new VoiceServiceError(
           400,
@@ -359,14 +384,24 @@ export function createVoiceRelayService(
         webhookDeliveryStatus: "pending",
         toNumber: input.toNumber,
         fromNumber,
+        phoneNumberId: phone?.id,
         providerSource: credentials.source,
         metadata: input.metadata ?? null,
         providerOptions: input.providerOptions ?? null,
-        raw: {},
+        raw: {
+          resolvedPhoneNumber: phone
+            ? {
+                id: phone.id,
+                number: phone.number,
+                twilioPhoneNumberSid: phone.twilioPhoneNumberSid,
+              }
+            : undefined,
+        },
       })
       await repo.addCallEvent(userId, call.id, "call.queued", {
         toNumber: input.toNumber,
         fromNumber,
+        phoneNumberId: phone?.id,
       })
       try {
         const root = publicBaseUrl(baseUrl)
@@ -440,6 +475,105 @@ export function createVoiceRelayService(
 
     async getPhoneNumber(userId: string, id: string) {
       return repo.getPhoneNumber(userId, id)
+    },
+
+    async importPhoneNumbers(userId: string) {
+      const credentials = await repo.resolveTwilioCredentials(userId)
+      if (!credentials) {
+        throw new VoiceServiceError(
+          400,
+          "TWILIO_CONFIG_MISSING",
+          "No user Twilio config or platform Twilio fallback is configured"
+        )
+      }
+      const root = publicBaseUrl(credentials.defaultWebhookBaseUrl)
+      const voiceUrl = `${root}/api/v1/twilio/voice`
+      let incoming
+      try {
+        incoming = await twilio.listIncomingPhoneNumbers(credentials)
+      } catch (error) {
+        throw new VoiceServiceError(
+          502,
+          "TWILIO_PHONE_NUMBER_IMPORT_FAILED",
+          error instanceof Error
+            ? error.message
+            : "Failed to import Twilio phone numbers"
+        )
+      }
+      const existing = await repo.listPhoneNumbers(userId, { limit: 500 })
+      const existingBySid = new Map(
+        existing.items
+          .filter((phone) => phone.twilioPhoneNumberSid)
+          .map((phone) => [phone.twilioPhoneNumberSid, phone])
+      )
+      const existingByNumber = new Map(
+        existing.items
+          .filter((phone) => phone.number)
+          .map((phone) => [phone.number, phone])
+      )
+      const imported: JsonPhoneNumber[] = []
+      for (const remote of incoming) {
+        let webhook:
+          | { status: "configured"; voiceUrl?: string; voiceMethod?: string }
+          | { status: "failed"; error: string }
+        try {
+          const updated = await twilio.updateIncomingPhoneNumberWebhook(
+            credentials,
+            {
+              sid: remote.sid,
+              voiceUrl,
+              voiceMethod: "POST",
+            }
+          )
+          webhook = {
+            status: "configured",
+            voiceUrl: updated.voiceUrl ?? voiceUrl,
+            voiceMethod: updated.voiceMethod ?? "POST",
+          }
+        } catch (error) {
+          webhook = {
+            status: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Twilio webhook update failed",
+          }
+        }
+
+        const current =
+          existingBySid.get(remote.sid) ?? existingByNumber.get(remote.phoneNumber)
+        const providerOptions = {
+          ...(current?.providerOptions ?? {}),
+          twilioPhoneNumberSid: remote.sid,
+          twilioAccountSid: remote.accountSid ?? credentials.accountSid,
+          webhook,
+          importedFromTwilioAt: new Date().toISOString(),
+        }
+        const raw = {
+          ...(current?.raw && typeof current.raw === "object"
+            ? (current.raw as Record<string, unknown>)
+            : {}),
+          twilio: remote.raw,
+          webhook,
+        }
+        const input = {
+          name: current?.name ?? remote.friendlyName,
+          number: remote.phoneNumber,
+          inboundAgentId: current?.inboundAgentId,
+          outboundAgentId: current?.outboundAgentId,
+          webhookUrl: voiceUrl,
+          areaCode: current?.areaCode,
+          twilioPhoneNumberSid: remote.sid,
+          twilioAccountSid: remote.accountSid ?? credentials.accountSid,
+          providerOptions,
+          raw,
+        }
+        const saved = current
+          ? await repo.updatePhoneNumber(userId, current.id, input)
+          : await repo.createPhoneNumber(userId, input)
+        if (saved) imported.push(saved)
+      }
+      return { items: imported, hasMore: false as const, imported: imported.length }
     },
 
     async createPhoneNumber(
@@ -566,6 +700,37 @@ export function createVoiceRelayService(
         agent = phone.inboundAgentId
           ? await repo.getAgent(userId, phone.inboundAgentId)
           : null
+        if (!agent) {
+          call = await repo.createCall(userId, {
+            id: crypto.randomUUID(),
+            userId,
+            agentId: phone.inboundAgentId,
+            direction: "inbound",
+            status: "error",
+            postCallStatus: "failed",
+            analysisStatus: "failed",
+            successEvaluationStatus: "failed",
+            webhookDeliveryStatus: "skipped",
+            toNumber,
+            fromNumber: formValue(input.params, "From", "from"),
+            phoneNumberId: phone.id,
+            twilioCallSid: formValue(input.params, "CallSid", "callSid"),
+            twilioAccountSid: formValue(input.params, "AccountSid", "accountSid"),
+            providerSource: "user",
+            metadata: null,
+            providerOptions: null,
+            raw: {
+              twilio: input.params,
+              error: "No inbound agent configured for phone number",
+            },
+          })
+          await repo.addCallEvent(userId, call.id, "twilio.voice.unconfigured", {
+            phoneNumberId: phone.id,
+            toNumber,
+            reason: "No inbound agent configured for phone number",
+          })
+          return '<?xml version="1.0" encoding="UTF-8"?><Response><Say>This phone number is not configured yet. Please try again later.</Say></Response>'
+        }
         call = await repo.createCall(userId, {
           id: crypto.randomUUID(),
           userId,
