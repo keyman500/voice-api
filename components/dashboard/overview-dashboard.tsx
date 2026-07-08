@@ -79,9 +79,9 @@ export function OverviewDashboard() {
   return (
     <div className="space-y-8">
       <DashboardPageIntro
-        eyebrow="Control room"
-        title="Operational visibility across your voice stack."
-        description="Track readiness, launch outbound calls, inspect recent sessions, and jump into the exact surfaces that map to the ConversationRelay API."
+        eyebrow="Dashboard"
+        title="Operational visibility across your voice stack"
+        description="Track readiness, launch outbound calls, inspect recent sessions"
         action={
           <div className="flex flex-wrap gap-3">
             <Button render={<Link href="/dashboard/calls" />}>

@@ -148,7 +148,7 @@ export function CallLogDetail({ id }: { id: string }) {
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {call.postCallStatus === "ready"
-                        ? "Private Blob copy ready"
+                        ? ""
                         : call.postCallStatus === "failed"
                           ? "Post-call processing failed"
                           : call.postCallStatus === "processing" ||

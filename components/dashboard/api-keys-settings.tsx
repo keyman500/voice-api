@@ -197,7 +197,7 @@ export function ApiKeysSettings() {
                   API key created
                 </p>
                 <p className="mt-1 text-sm text-teal-800/80 dark:text-teal-100/80">
-                  Copy it now. Better Auth will only show this secret once.
+                  Copy it now. Voice API will only show this secret once.
                 </p>
               </div>
               <Button type="button" variant="outline" onClick={copyCreatedKey}>

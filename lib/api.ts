@@ -52,7 +52,7 @@ export const app = new Elysia({ prefix: "/api" })
           title: "Voice API",
           version: "0.0.1",
           description:
-            "ConversationRelay-backed agents, calls, call logs, recordings, phone numbers, and Twilio configuration — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie, `Authorization: Bearer <api_key>`, or Better Auth's default `x-api-key: <api_key>` header. API keys can be created from Dashboard Settings.",
+            "ConversationRelay-backed agents, calls, call logs, recordings, phone numbers, and Twilio configuration — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie, `Authorization: Bearer <api_key>`, or the default Better Auth `x-api-key: <api_key>` header. API keys can be created from Dashboard Settings.",
         },
         tags: [
           { name: "Authentication", description: "Use a session cookie, Bearer API key, or x-api-key header for protected v1 routes" },

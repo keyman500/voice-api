@@ -172,10 +172,10 @@ export function DashboardSidebar({
                   fontFamily: "var(--font-dashboard-brand), var(--font-sans)",
                 }}
               >
-                Control room
+                Dashboard
               </div>
               <p className="text-xs leading-snug text-muted-foreground">
-                Agents, calls, and API surface — all in one place.
+                Agents, calls, and API surface all in one place.
               </p>
             </>
           ) : (
