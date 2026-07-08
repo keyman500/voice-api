@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals"
 import { VOICE_API_PROVIDER_ID } from "@/lib/voice-constants"
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { createVoiceRelayService } = require("@/lib/services/voice-relay-service")
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+/* eslint-disable @typescript-eslint/no-require-imports */
+const {
+  createVoiceRelayService,
+} = require("@/lib/services/voice-relay-service")
 const { VoiceServiceError } = require("@/lib/services")
+const { setBillingServiceForTests } = require("@/lib/services/billing")
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 const fakeUser = { id: "relay-user-1" }
 
@@ -82,7 +85,10 @@ function createProcessRepo() {
       agents.set(String(row.id), row)
       return row
     }),
-    listAgents: mockAsync(async () => ({ items: Array.from(agents.values()), hasMore: false })),
+    listAgents: mockAsync(async () => ({
+      items: Array.from(agents.values()),
+      hasMore: false,
+    })),
     getAgent: mockAsync(async (_userId, id) => agents.get(String(id)) ?? null),
     updateAgent: mockAsync(async (_userId, id, input) => {
       const current = agents.get(String(id))
@@ -106,7 +112,10 @@ function createProcessRepo() {
       calls.set(String(row.id), row)
       return row
     }),
-    listCalls: mockAsync(async () => ({ items: Array.from(calls.values()), hasMore: false })),
+    listCalls: mockAsync(async () => ({
+      items: Array.from(calls.values()),
+      hasMore: false,
+    })),
     getCall: mockAsync(async (_userId, id) => calls.get(String(id)) ?? null),
     findCallById: mockAsync(async (id) => calls.get(String(id)) ?? null),
     updateCall: mockAsync(async (_userId, id, input) => {
@@ -139,8 +148,13 @@ function createProcessRepo() {
       phones.set(String(row.id), row)
       return { ...row, agentId: row.inboundAgentId }
     }),
-    listPhoneNumbers: mockAsync(async () => ({ items: Array.from(phones.values()), hasMore: false })),
-    getPhoneNumber: mockAsync(async (_userId, id) => phones.get(String(id)) ?? null),
+    listPhoneNumbers: mockAsync(async () => ({
+      items: Array.from(phones.values()),
+      hasMore: false,
+    })),
+    getPhoneNumber: mockAsync(
+      async (_userId, id) => phones.get(String(id)) ?? null
+    ),
     findPhoneNumberByNumber: mockAsync(async (number) => {
       for (const phone of phones.values()) {
         if (phone.number === number) return phone
@@ -154,7 +168,9 @@ function createProcessRepo() {
       phones.set(String(id), next)
       return next
     }),
-    deletePhoneNumber: mockAsync(async (_userId, id) => phones.delete(String(id))),
+    deletePhoneNumber: mockAsync(async (_userId, id) =>
+      phones.delete(String(id))
+    ),
     addTranscriptItem: mockAsync(async (_userId, input) => {
       const item: Record<string, unknown> = {
         id: `transcript-${String(
@@ -170,12 +186,15 @@ function createProcessRepo() {
       transcriptItems.set(String(item.callId), items)
       return item
     }),
-    listTranscriptItems: mockAsync(async (_userId, callId) =>
-      transcriptItems.get(String(callId)) ?? []
+    listTranscriptItems: mockAsync(
+      async (_userId, callId) => transcriptItems.get(String(callId)) ?? []
     ),
   }
 
-  return { repo, stores: { twilioConfigs, agents, calls, phones, events, transcriptItems } }
+  return {
+    repo,
+    stores: { twilioConfigs, agents, calls, phones, events, transcriptItems },
+  }
 }
 
 function createTwilioMock() {
@@ -191,18 +210,24 @@ function createTwilioMock() {
       return `<Response><Connect><ConversationRelay url="${input.websocketUrl}" /></Connect></Response>`
     }),
     validateSignature: jest.fn((input: { url: string }) => Boolean(input.url)),
-    getRecording: jest.fn(async (_credentials: unknown, _recordingSid: unknown) => ({
-      sid: "RE123",
-      status: "completed",
-      contentType: "audio/mpeg",
-      raw: { sid: "RE123", status: "completed" },
-    })),
-    fetchRecordingMedia: jest.fn(async (_credentials: unknown, _recordingSid: unknown) => ({
-      body: "audio bytes",
-      contentType: "audio/mpeg",
-      size: 11,
-    })),
-    deleteRecording: jest.fn(async (_credentials: unknown, _recordingSid: unknown) => undefined),
+    getRecording: jest.fn(
+      async (_credentials: unknown, _recordingSid: unknown) => ({
+        sid: "RE123",
+        status: "completed",
+        contentType: "audio/mpeg",
+        raw: { sid: "RE123", status: "completed" },
+      })
+    ),
+    fetchRecordingMedia: jest.fn(
+      async (_credentials: unknown, _recordingSid: unknown) => ({
+        body: "audio bytes",
+        contentType: "audio/mpeg",
+        size: 11,
+      })
+    ),
+    deleteRecording: jest.fn(
+      async (_credentials: unknown, _recordingSid: unknown) => undefined
+    ),
     listIncomingPhoneNumbers: jest.fn(async () => [
       {
         sid: "PN123",
@@ -230,35 +255,73 @@ function createTwilioMock() {
 }
 
 function createLlmMock() {
+  async function* textStream() {
+    yield "Hello"
+    yield " there"
+  }
   return {
-    async *streamResponse() {
-      yield "Hello"
-      yield " there"
-    },
+    streamResponse: jest.fn(() => ({
+      model: "openai/gpt-4o-mini",
+      textStream: textStream(),
+      usage: Promise.resolve({
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+      }),
+    })),
     analyzeCall: jest.fn(async () => ({
-      summary: "Caller needed help.",
-      outcome: "resolved",
-      sentiment: "neutral",
-      actionItems: [],
-      keyMoments: [],
-      transcriptQualityNotes: "Clear.",
+      model: "openai/gpt-4o-mini",
+      analysis: {
+        summary: "Caller needed help.",
+        outcome: "resolved",
+        sentiment: "neutral",
+        actionItems: [],
+        keyMoments: [],
+        transcriptQualityNotes: "Clear.",
+      },
+      usage: {
+        inputTokens: 200,
+        outputTokens: 50,
+        totalTokens: 250,
+      },
     })),
     evaluateCallSuccess: jest.fn(async () => ({
-      successful: true,
-      reason: "The caller got the help they needed.",
+      model: "openai/gpt-4o-mini",
+      evaluation: {
+        successful: true,
+        reason: "The caller got the help they needed.",
+      },
+      usage: {
+        inputTokens: 120,
+        outputTokens: 20,
+        totalTokens: 140,
+      },
     })),
   }
 }
 
 function createFailingLlmMock() {
+  async function* textStream() {
+    throw new Error("rate limited")
+  }
   return {
-    async *streamResponse() {
-      throw new Error("rate limited")
-    },
-    analyzeCall: jest.fn(async () => ({ summary: "not used" })),
+    streamResponse: jest.fn(() => ({
+      model: "openai/gpt-4o-mini",
+      textStream: textStream(),
+      usage: Promise.resolve({}),
+    })),
+    analyzeCall: jest.fn(async () => ({
+      model: "openai/gpt-4o-mini",
+      analysis: { summary: "not used" },
+      usage: {},
+    })),
     evaluateCallSuccess: jest.fn(async () => ({
-      successful: false,
-      reason: "not used",
+      model: "openai/gpt-4o-mini",
+      evaluation: {
+        successful: false,
+        reason: "not used",
+      },
+      usage: {},
     })),
   }
 }
@@ -273,13 +336,46 @@ function createFilesMock() {
       contentType: "audio/mpeg",
     })),
     downloadRecording: jest.fn(),
-    headRecording: jest.fn(async (_key: unknown) => new File(["audio bytes"], "recording.mp3", { type: "audio/mpeg" })),
+    headRecording: jest.fn(
+      async (_key: unknown) =>
+        new File(["audio bytes"], "recording.mp3", { type: "audio/mpeg" })
+    ),
     deleteRecording: jest.fn(),
+  }
+}
+
+function createBillingMock() {
+  return {
+    plans: {},
+    modelPricing: jest.fn(() => ({
+      eventName: "voice_credit_usage",
+      creditUsd: 0.01,
+      aiMarkup: 1.5,
+      runtimeCreditsPerStartedMinute: 1,
+      models: [],
+    })),
+    status: jest.fn(async () => ({
+      configured: true,
+      active: true,
+      plan: { id: "starter", includedCredits: 1000 },
+      credits: {
+        used: 0,
+        credited: 1000,
+        balance: 1000,
+        estimatedOverageCredits: 0,
+      },
+      recentUsage: [],
+    })),
+    assertCanStartCall: jest.fn(async () => true),
+    checkout: jest.fn(async () => ({ url: "https://polar.example/checkout" })),
+    portal: jest.fn(async () => ({ url: "https://polar.example/portal" })),
+    recordUsage: jest.fn(async (input: unknown) => input),
   }
 }
 
 beforeEach(() => {
   delete process.env.TWILIO_WEBHOOK_USER_ID
+  setBillingServiceForTests(createBillingMock() as never)
 })
 
 describe("voice relay service process behavior", () => {
@@ -317,8 +413,7 @@ describe("voice relay service process behavior", () => {
         from: "+15555550123",
         voiceUrl: `https://voice.example.com/api/v1/twilio/voice?callId=${call.id}`,
         statusCallbackUrl: `https://voice.example.com/api/v1/twilio/status?callId=${call.id}`,
-        recordingStatusCallbackUrl:
-          `https://voice.example.com/api/v1/twilio/recording?callId=${call.id}`,
+        recordingStatusCallbackUrl: `https://voice.example.com/api/v1/twilio/recording?callId=${call.id}`,
         record: true,
       })
     )
@@ -390,6 +485,40 @@ describe("voice relay service process behavior", () => {
     })
   })
 
+  it("blocks outbound call starts when billing is inactive", async () => {
+    const { repo } = createProcessRepo()
+    const twilio = createTwilioMock()
+    const billing = createBillingMock()
+    billing.assertCanStartCall.mockRejectedValue(
+      new VoiceServiceError(
+        402,
+        "BILLING_SUBSCRIPTION_REQUIRED",
+        "An active subscription is required to start calls"
+      )
+    )
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      billing as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+
+    await expect(
+      service.createCall(fakeUser.id, {
+        toNumber: "+15555550100",
+      })
+    ).rejects.toMatchObject({ code: "BILLING_SUBSCRIPTION_REQUIRED" })
+    expect(twilio.createCall).not.toHaveBeenCalled()
+  })
+
   it("returns a clear error when Twilio number import fails without deleting local numbers", async () => {
     const { repo, stores } = createProcessRepo()
     const twilio = createTwilioMock()
@@ -413,11 +542,13 @@ describe("voice relay service process behavior", () => {
       name: "Existing",
     })
 
-    await expect(service.importPhoneNumbers(fakeUser.id)).rejects.toMatchObject({
-      code: "TWILIO_PHONE_NUMBER_IMPORT_FAILED",
-      status: 502,
-      message: "Twilio unavailable",
-    })
+    await expect(service.importPhoneNumbers(fakeUser.id)).rejects.toMatchObject(
+      {
+        code: "TWILIO_PHONE_NUMBER_IMPORT_FAILED",
+        status: 502,
+        message: "Twilio unavailable",
+      }
+    )
     expect(Array.from(stores.phones.values())).toEqual([
       expect.objectContaining({
         name: "Existing",
@@ -563,9 +694,7 @@ describe("voice relay service process behavior", () => {
     ).resolves.toBe(true)
     expect(
       twilio.validateSignature.mock.calls.map(([input]) => input.url)
-    ).toContain(
-      "https://voice.example.com/api/v1/twilio/voice?callId=call-1"
-    )
+    ).toContain("https://voice.example.com/api/v1/twilio/voice?callId=call-1")
   })
 
   it("voice webhook emits relay TwiML with the configured public websocket URL", async () => {
@@ -660,6 +789,60 @@ describe("voice relay service process behavior", () => {
     )
   })
 
+  it("inbound voice webhook returns friendly TwiML when billing is inactive", async () => {
+    const { repo, stores } = createProcessRepo()
+    const billing = createBillingMock()
+    billing.assertCanStartCall.mockRejectedValue(
+      new VoiceServiceError(
+        402,
+        "BILLING_SUBSCRIPTION_REQUIRED",
+        "An active subscription is required to start calls"
+      )
+    )
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      billing as never
+    )
+
+    await service.createAgent(fakeUser.id, { name: "Inbound" })
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultWebhookBaseUrl: "https://voice.example.com",
+    })
+    await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550123",
+      inboundAgentId: "agent-1",
+    })
+
+    const twiml = await service.handleVoiceWebhook({
+      url: "https://voice.example.com/api/v1/twilio/voice",
+      signature: "valid",
+      params: {
+        To: "+15555550123",
+        From: "+15555550100",
+        CallSid: "CA123",
+        AccountSid: "AC123456789",
+      },
+    })
+
+    expect(twiml).toContain("active subscription")
+    const createdCall = Array.from(stores.calls.values())[0]
+    expect(createdCall).toMatchObject({
+      direction: "inbound",
+      status: "error",
+      phoneNumberId: "phone-1",
+    })
+    expect(stores.events.get(String(createdCall.id))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "billing.call.blocked" }),
+      ])
+    )
+  })
+
   it("resolves relay websocket ownership from callId", async () => {
     const { repo } = createProcessRepo()
     const service = createVoiceRelayService(
@@ -678,7 +861,9 @@ describe("voice relay service process behavior", () => {
       toNumber: "+15555550100",
     })
 
-    await expect(service.resolveRelayCall(String(call.id))).resolves.toMatchObject({
+    await expect(
+      service.resolveRelayCall(String(call.id))
+    ).resolves.toMatchObject({
       userId: fakeUser.id,
       call: expect.objectContaining({ id: call.id }),
     })
@@ -686,11 +871,13 @@ describe("voice relay service process behavior", () => {
 
   it("relay prompt stores transcript/events and streams assistant tokens", async () => {
     const { repo, stores } = createProcessRepo()
+    const billing = createBillingMock()
     const service = createVoiceRelayService(
       repo as never,
       createTwilioMock() as never,
       createLlmMock() as never,
-      createFilesMock() as never
+      createFilesMock() as never,
+      billing as never
     )
 
     await service.createAgent(fakeUser.id, {
@@ -716,7 +903,9 @@ describe("voice relay service process behavior", () => {
     })
 
     expect(stores.events.get(String(call.id))).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "relay.prompt" })])
+      expect.arrayContaining([
+        expect.objectContaining({ type: "relay.prompt" }),
+      ])
     )
     expect(stores.transcriptItems.get(String(call.id))).toEqual(
       expect.arrayContaining([
@@ -730,15 +919,26 @@ describe("voice relay service process behavior", () => {
         expect.objectContaining({ type: "text", last: true }),
       ])
     )
+    expect(billing.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: fakeUser.id,
+        callId: call.id,
+        agentId: "agent-1",
+        kind: "ai_tokens",
+        model: "openai/gpt-4o-mini",
+      })
+    )
   })
 
   it("status webhook resolves user from callId and marks ended", async () => {
     const { repo, stores } = createProcessRepo()
+    const billing = createBillingMock()
     const service = createVoiceRelayService(
       repo as never,
       createTwilioMock() as never,
       createLlmMock() as never,
-      createFilesMock() as never
+      createFilesMock() as never,
+      billing as never
     )
 
     await service.upsertTwilioConfig(fakeUser.id, {
@@ -769,6 +969,15 @@ describe("voice relay service process behavior", () => {
       expect.arrayContaining([
         expect.objectContaining({ type: "twilio.call.status" }),
       ])
+    )
+    expect(billing.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: fakeUser.id,
+        callId: call.id,
+        kind: "call_runtime",
+        durationSeconds: 42,
+        credits: 1,
+      })
     )
   })
 
@@ -870,7 +1079,9 @@ describe("voice relay service process behavior", () => {
       authToken: "token",
       defaultFromNumber: "+15555550123",
     })
-    const call = await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+    })
 
     const uploaded = await service.ingestRecording({
       userId: fakeUser.id,
@@ -890,7 +1101,9 @@ describe("voice relay service process behavior", () => {
       recordingIngestedAt: expect.any(Date),
     })
     expect(stores.events.get(String(call.id))).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "recording.stored" })])
+      expect.arrayContaining([
+        expect.objectContaining({ type: "recording.stored" }),
+      ])
     )
   })
 
@@ -911,7 +1124,9 @@ describe("voice relay service process behavior", () => {
       authToken: "token",
       defaultFromNumber: "+15555550123",
     })
-    const call = await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+    })
     await service.handleRecordingWebhook({
       callId: String(call.id),
       params: { RecordingSid: "RE123", RecordingStatus: "completed" },
@@ -926,7 +1141,9 @@ describe("voice relay service process behavior", () => {
       "RE123"
     )
     expect(files.uploadRecording).toHaveBeenCalled()
-    expect(files.headRecording).toHaveBeenCalledWith("recordings/call-1/rec-1.mp3")
+    expect(files.headRecording).toHaveBeenCalledWith(
+      "recordings/call-1/rec-1.mp3"
+    )
     expect(twilio.deleteRecording).not.toHaveBeenCalled()
     expect(stores.calls.get(String(call.id))).toMatchObject({
       postCallStatus: "ready",
@@ -951,7 +1168,8 @@ describe("voice relay service process behavior", () => {
 
     await service.createAgent(fakeUser.id, {
       name: "Support",
-      successEvaluationPrompt: "The call is successful only if a demo was booked.",
+      successEvaluationPrompt:
+        "The call is successful only if a demo was booked.",
     })
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
@@ -967,7 +1185,10 @@ describe("voice relay service process behavior", () => {
       params: { RecordingSid: "RE123", RecordingStatus: "completed" },
     })
 
-    await service.processPostCall({ userId: fakeUser.id, callId: String(call.id) })
+    await service.processPostCall({
+      userId: fakeUser.id,
+      callId: String(call.id),
+    })
 
     expect(llm.evaluateCallSuccess as jest.Mock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -993,7 +1214,9 @@ describe("voice relay service process behavior", () => {
       authToken: "token",
       defaultFromNumber: "+15555550123",
     })
-    const call = await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+    })
     await service.handleRecordingWebhook({
       callId: String(call.id),
       params: { RecordingSid: "RE123", RecordingStatus: "completed" },
@@ -1126,15 +1349,22 @@ describe("voice relay service process behavior", () => {
       defaultFromNumber: "+15555550123",
       deleteTwilioRecordingAfterBlobUpload: true,
     })
-    const call = await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+    })
     await service.handleRecordingWebhook({
       callId: String(call.id),
       params: { RecordingSid: "RE123", RecordingStatus: "completed" },
     })
 
-    await service.processPostCall({ userId: fakeUser.id, callId: String(call.id) })
+    await service.processPostCall({
+      userId: fakeUser.id,
+      callId: String(call.id),
+    })
 
-    expect(files.headRecording).toHaveBeenCalledWith("recordings/call-1/rec-1.mp3")
+    expect(files.headRecording).toHaveBeenCalledWith(
+      "recordings/call-1/rec-1.mp3"
+    )
     expect(twilio.deleteRecording).toHaveBeenCalledWith(
       expect.objectContaining({ accountSid: "AC123456789" }),
       "RE123"

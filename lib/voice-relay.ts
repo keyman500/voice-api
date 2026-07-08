@@ -1,7 +1,8 @@
-import { Elysia } from "elysia"
+import { Elysia, t } from "elysia"
 import type { AuthedContext } from "@/lib/resolve-user"
 import { resolveAuthedContext } from "@/lib/resolve-user"
 import { VoiceServiceError } from "./services"
+import { getBillingService } from "./services/billing"
 import { getPostCallWorkflowStarter } from "./services/post-call-workflow-runner"
 import { getVoiceRelayService } from "./services/voice-relay-service"
 import * as s from "./v1-schemas"
@@ -39,7 +40,10 @@ async function formParams(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
   const params: Record<string, string> = {}
   if (contentType.includes("application/json")) {
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const body = (await request.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >
     for (const [key, value] of Object.entries(body)) {
       if (typeof value === "string") params[key] = value
     }
@@ -62,7 +66,10 @@ async function formParams(request: Request) {
 function publicUrl(request: Request) {
   const url = new URL(request.url)
   url.protocol = request.headers.get("x-forwarded-proto") ?? url.protocol
-  url.host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? url.host
+  url.host =
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    url.host
   return url.toString()
 }
 
@@ -85,21 +92,23 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
     },
   })
 
-  .get(
-    "/twilio-config",
-    ({ authed }) => getVoiceRelayService().getTwilioConfig(authed.user.id),
-    {
-      authUser: true,
-      detail: {
-        summary: "Get redacted Twilio config",
+	  .get(
+	    "/twilio-config",
+	    async ({ authed }) =>
+	      await getVoiceRelayService().getTwilioConfig(authed.user.id),
+	    {
+	      authUser: true,
+	      response: { 200: s.twilioConfigResponse, ...s.standardErrorResponses },
+	      detail: {
+	        summary: "Get redacted Twilio config",
         tags: ["Twilio config"],
       },
     }
   )
-  .put(
-    "/twilio-config",
-    ({ authed, body }) =>
-      getVoiceRelayService().upsertTwilioConfig(authed.user.id, {
+	  .put(
+	    "/twilio-config",
+	    async ({ authed, body }) =>
+	      await getVoiceRelayService().upsertTwilioConfig(authed.user.id, {
         accountSid: body.accountSid,
         authToken: body.authToken,
         defaultFromNumber: body.defaultFromNumber,
@@ -107,11 +116,12 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         deleteTwilioRecordingAfterBlobUpload:
           body.deleteTwilioRecordingAfterBlobUpload,
       }),
-    {
-      authUser: true,
-      body: s.upsertTwilioConfigBody,
-      detail: { summary: "Set Twilio config", tags: ["Twilio config"] },
-    }
+	    {
+	      authUser: true,
+	      body: s.upsertTwilioConfigBody,
+	      response: { 200: s.twilioConfigResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Set Twilio config", tags: ["Twilio config"] },
+	    }
   )
   .post(
     "/twilio-config/test",
@@ -122,48 +132,133 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         return serviceError(error, set)
       }
     },
-    {
-      authUser: true,
-      detail: { summary: "Test Twilio config", tags: ["Twilio config"] },
-    }
+	    {
+	      authUser: true,
+	      response: { 200: s.twilioConfigTestResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Test Twilio config", tags: ["Twilio config"] },
+	    }
   )
   .delete(
     "/twilio-config",
     async ({ authed }) => {
-      const deleted = await getVoiceRelayService().deleteTwilioConfig(authed.user.id)
+      const deleted = await getVoiceRelayService().deleteTwilioConfig(
+        authed.user.id
+      )
       return { ok: true as const, deleted }
     },
-    {
-      authUser: true,
-      detail: { summary: "Delete Twilio config", tags: ["Twilio config"] },
-    }
+	    {
+	      authUser: true,
+	      response: { 200: s.deleteResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Delete Twilio config", tags: ["Twilio config"] },
+	    }
   )
 
   .get(
-    "/agents",
-    ({ authed, query }) =>
-      getVoiceRelayService().listAgents(authed.user.id, {
+    "/billing/status",
+    async ({ authed, set }) => {
+      try {
+        return await getBillingService().status(authed.user.id)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+	    {
+	      authUser: true,
+	      response: { 200: s.billingStatusResponse, ...s.standardErrorResponses },
+	      detail: {
+        summary: "Get billing status",
+        description:
+          "Returns the current Polar subscription, Voice AI credit balance, plan catalog, and recent usage ledger entries.",
+        tags: ["Billing"],
+      },
+    }
+  )
+  .post(
+    "/billing/checkout",
+    async ({ authed, body, set }) => {
+      try {
+        return await getBillingService().checkout(authed.user.id, body.plan)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+	    {
+	      authUser: true,
+	      body: s.billingCheckoutBody,
+	      response: { 200: s.billingCheckoutResponse, ...s.standardErrorResponses },
+	      detail: {
+        summary: "Create billing checkout",
+        tags: ["Billing"],
+      },
+    }
+  )
+  .post(
+    "/billing/portal",
+    async ({ authed, set }) => {
+      try {
+        return await getBillingService().portal(authed.user.id)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+	    {
+	      authUser: true,
+	      response: { 200: s.billingPortalResponse, ...s.standardErrorResponses },
+	      detail: {
+        summary: "Create billing portal session",
+        tags: ["Billing"],
+      },
+    }
+  )
+	  .get("/billing/model-pricing", () => getBillingService().modelPricing(), {
+	    response: { 200: s.modelPricingResponse },
+	    detail: {
+      summary: "Get Voice AI credit model pricing",
+      tags: ["Billing"],
+    },
+  })
+
+	  .get(
+	    "/agents",
+	    async ({ authed, query }) =>
+	      await getVoiceRelayService().listAgents(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
       }),
-    { authUser: true, query: s.listAgentsQuery, detail: { tags: ["Agents"] } }
+	    {
+	      authUser: true,
+	      query: s.listAgentsQuery,
+	      response: { 200: s.agentListResponse, ...s.standardErrorResponses },
+	      detail: { summary: "List agents", tags: ["Agents"] },
+	    }
   )
   .get(
     "/agents/:id",
     async ({ authed, params, set }) => {
-      const agent = await getVoiceRelayService().getAgent(authed.user.id, params.id)
+      const agent = await getVoiceRelayService().getAgent(
+        authed.user.id,
+        params.id
+      )
       if (!agent) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Agent not found" } }
       }
       return agent
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Agents"] } }
+	    {
+	      authUser: true,
+	      params: s.idParam,
+	      response: {
+	        200: s.agentResponse,
+	        ...s.standardErrorResponses,
+	      },
+	      detail: { summary: "Get agent", tags: ["Agents"] },
+	    }
   )
-  .post(
-    "/agents",
-    ({ authed, body }) =>
-      getVoiceRelayService().createAgent(authed.user.id, {
+	  .post(
+	    "/agents",
+	    async ({ authed, body }) =>
+	      await getVoiceRelayService().createAgent(authed.user.id, {
         name: body.name,
         voice: body.voice,
         model: body.model,
@@ -178,7 +273,12 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         metadata: body.metadata,
         providerOptions: body.providerOptions,
       }),
-    { authUser: true, body: s.createAgentBody, detail: { tags: ["Agents"] } }
+	    {
+	      authUser: true,
+	      body: s.createAgentBody,
+	      response: { 200: s.agentResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Create agent", tags: ["Agents"] },
+	    }
   )
   .patch(
     "/agents/:id",
@@ -209,29 +309,38 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       return agent
     },
     {
-      authUser: true,
-      params: s.idParam,
-      body: s.updateAgentBody,
-      detail: { tags: ["Agents"] },
-    }
+	      authUser: true,
+	      params: s.idParam,
+	      body: s.updateAgentBody,
+	      response: { 200: s.agentResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Update agent", tags: ["Agents"] },
+	    }
   )
   .delete(
     "/agents/:id",
     async ({ authed, params, set }) => {
-      const ok = await getVoiceRelayService().deleteAgent(authed.user.id, params.id)
+      const ok = await getVoiceRelayService().deleteAgent(
+        authed.user.id,
+        params.id
+      )
       if (!ok) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Agent not found" } }
       }
       return { ok: true as const }
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Agents"] } }
+	    {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.okResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Delete agent", tags: ["Agents"] },
+	    }
   )
 
-  .get(
-    "/calls",
-    ({ authed, query }) =>
-      getVoiceRelayService().listCalls(authed.user.id, {
+	  .get(
+	    "/calls",
+	    async ({ authed, query }) =>
+	      await getVoiceRelayService().listCalls(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
         agentId: query.agentId,
@@ -240,9 +349,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         callSuccessful: query.callSuccessful,
       }),
     {
-      authUser: true,
-      query: s.listCallsQuery,
-      detail: {
+	      authUser: true,
+	      query: s.listCallsQuery,
+	      response: { 200: s.callListResponse, ...s.standardErrorResponses },
+	      detail: {
         summary: "List call logs",
         description:
           "Returns paginated call history records for the authenticated user. This powers the dashboard logs table.",
@@ -253,7 +363,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
   .get(
     "/calls/:id",
     async ({ authed, params, set }) => {
-      const call = await getVoiceRelayService().getCall(authed.user.id, params.id)
+      const call = await getVoiceRelayService().getCall(
+        authed.user.id,
+        params.id
+      )
       if (!call) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -261,9 +374,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       return call
     },
     {
-      authUser: true,
-      params: s.idParam,
-      detail: {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.callResponse, ...s.standardErrorResponses },
+	      detail: {
         summary: "Get call log detail",
         description:
           "Returns one call record with transcript, event history, recording status, and post-call analysis fields.",
@@ -288,9 +402,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
     },
     {
-      authUser: true,
-      body: s.createCallBody,
-      detail: {
+	      authUser: true,
+	      body: s.createCallBody,
+	      response: { 200: s.callResponse, ...s.standardErrorResponses },
+	      detail: {
         summary: "Create outbound call",
         tags: ["Calls"],
       },
@@ -299,11 +414,15 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
   .patch(
     "/calls/:id",
     async ({ authed, params, body, set }) => {
-      const call = await getVoiceRelayService().updateCall(authed.user.id, params.id, {
-        metadata: body.metadata,
-        providerOptions: body.providerOptions,
-        status: body.status,
-      })
+      const call = await getVoiceRelayService().updateCall(
+        authed.user.id,
+        params.id,
+        {
+          metadata: body.metadata,
+          providerOptions: body.providerOptions,
+          status: body.status,
+        }
+      )
       if (!call) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -311,16 +430,20 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       return call
     },
     {
-      authUser: true,
-      params: s.idParam,
-      body: s.updateCallBody,
-      detail: { tags: ["Calls"] },
-    }
+	      authUser: true,
+	      params: s.idParam,
+	      body: s.updateCallBody,
+	      response: { 200: s.callResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Update call log", tags: ["Calls"] },
+	    }
   )
   .delete(
     "/calls/:id",
     async ({ authed, params, set }) => {
-      const ok = await getVoiceRelayService().deleteCall(authed.user.id, params.id)
+      const ok = await getVoiceRelayService().deleteCall(
+        authed.user.id,
+        params.id
+      )
       if (!ok) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -328,9 +451,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       return { ok: true as const }
     },
     {
-      authUser: true,
-      params: s.idParam,
-      detail: {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.okResponse, ...s.standardErrorResponses },
+	      detail: {
         summary: "Delete call log",
         tags: ["Calls", "Logs"],
       },
@@ -355,9 +479,15 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
     },
     {
-      authUser: true,
-      params: s.idParam,
-      detail: {
+	      authUser: true,
+	      params: s.idParam,
+	      response: {
+	        200: t.Unknown(),
+	        400: s.errorResponse,
+	        404: s.errorResponse,
+	        409: s.errorResponse,
+	      },
+	      detail: {
         summary: "Download call recording",
         description:
           "Streams the private Blob-backed recording for an authenticated call log once post-call ingestion is ready.",
@@ -368,7 +498,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
   .post(
     "/calls/:id/post-call/retry",
     async ({ authed, params, set }) => {
-      const call = await getVoiceRelayService().getCall(authed.user.id, params.id)
+      const call = await getVoiceRelayService().getCall(
+        authed.user.id,
+        params.id
+      )
       if (!call) {
         set.status = 404
         return { error: { code: "NOT_FOUND", message: "Call not found" } }
@@ -392,9 +525,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
     },
     {
-      authUser: true,
-      params: s.idParam,
-      detail: {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.postCallRetryResponse, ...s.standardErrorResponses },
+	      detail: {
         summary: "Retry post-call processing",
         description:
           "Restarts recording ingestion, analysis, success evaluation, and finished-call webhook delivery for a call.",
@@ -403,18 +537,19 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
     }
   )
 
-  .get(
-    "/phone-numbers",
-    ({ authed, query }) =>
-      getVoiceRelayService().listPhoneNumbers(authed.user.id, {
+	  .get(
+	    "/phone-numbers",
+	    async ({ authed, query }) =>
+	      await getVoiceRelayService().listPhoneNumbers(authed.user.id, {
         limit: query.limit,
         cursor: query.cursor,
       }),
     {
-      authUser: true,
-      query: s.listPhoneNumbersQuery,
-      detail: { tags: ["Phone numbers"] },
-    }
+	      authUser: true,
+	      query: s.listPhoneNumbersQuery,
+	      response: { 200: s.phoneNumberListResponse, ...s.standardErrorResponses },
+	      detail: { summary: "List phone numbers", tags: ["Phone numbers"] },
+	    }
   )
   .post(
     "/phone-numbers/import",
@@ -426,8 +561,12 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       }
     },
     {
-      authUser: true,
-      detail: {
+	      authUser: true,
+	      response: {
+	        200: s.importPhoneNumbersResponse,
+	        ...s.standardErrorResponses,
+	      },
+	      detail: {
         summary: "Import Twilio phone numbers",
         description:
           "Imports owned Twilio incoming phone numbers and configures each number to route inbound calls to the ConversationRelay webhook.",
@@ -444,16 +583,23 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       )
       if (!phone) {
         set.status = 404
-        return { error: { code: "NOT_FOUND", message: "Phone number not found" } }
+        return {
+          error: { code: "NOT_FOUND", message: "Phone number not found" },
+        }
       }
       return phone
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Phone numbers"] } }
+	    {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.phoneNumberResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Get phone number", tags: ["Phone numbers"] },
+	    }
   )
-  .post(
-    "/phone-numbers",
-    ({ authed, body }) =>
-      getVoiceRelayService().createPhoneNumber(authed.user.id, {
+	  .post(
+	    "/phone-numbers",
+	    async ({ authed, body }) =>
+	      await getVoiceRelayService().createPhoneNumber(authed.user.id, {
         name: body.name,
         inboundAgentId: body.inboundAgentId,
         outboundAgentId: body.outboundAgentId,
@@ -463,10 +609,11 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         number: body.number,
       }),
     {
-      authUser: true,
-      body: s.createPhoneNumberBody,
-      detail: { tags: ["Phone numbers"] },
-    }
+	      authUser: true,
+	      body: s.createPhoneNumberBody,
+	      response: { 200: s.phoneNumberResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Create phone number", tags: ["Phone numbers"] },
+	    }
   )
   .patch(
     "/phone-numbers/:id",
@@ -485,16 +632,19 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       )
       if (!phone) {
         set.status = 404
-        return { error: { code: "NOT_FOUND", message: "Phone number not found" } }
+        return {
+          error: { code: "NOT_FOUND", message: "Phone number not found" },
+        }
       }
       return phone
     },
     {
-      authUser: true,
-      params: s.idParam,
-      body: s.updatePhoneNumberBody,
-      detail: { tags: ["Phone numbers"] },
-    }
+	      authUser: true,
+	      params: s.idParam,
+	      body: s.updatePhoneNumberBody,
+	      response: { 200: s.phoneNumberResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Update phone number", tags: ["Phone numbers"] },
+	    }
   )
   .delete(
     "/phone-numbers/:id",
@@ -505,11 +655,18 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       )
       if (!ok) {
         set.status = 404
-        return { error: { code: "NOT_FOUND", message: "Phone number not found" } }
+        return {
+          error: { code: "NOT_FOUND", message: "Phone number not found" },
+        }
       }
       return { ok: true as const }
     },
-    { authUser: true, params: s.idParam, detail: { tags: ["Phone numbers"] } }
+	    {
+	      authUser: true,
+	      params: s.idParam,
+	      response: { 200: s.okResponse, ...s.standardErrorResponses },
+	      detail: { summary: "Delete phone number", tags: ["Phone numbers"] },
+	    }
   )
 
   .post(
@@ -529,7 +686,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         return twilioVoiceError(error)
       }
     },
-    { detail: { summary: "Twilio Voice webhook", tags: ["Twilio webhooks"] } }
+	    {
+	      response: { 200: t.String(), 401: t.String() },
+	      detail: { summary: "Twilio Voice webhook", tags: ["Twilio webhooks"] },
+	    }
   )
   .post(
     "/twilio/status",
@@ -538,7 +698,10 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         callId: query.callId,
         params: await formParams(request),
       }),
-    { detail: { summary: "Twilio status webhook", tags: ["Twilio webhooks"] } }
+	    {
+	      response: { 200: s.twilioStatusWebhookResponse },
+	      detail: { summary: "Twilio status webhook", tags: ["Twilio webhooks"] },
+	    }
   )
   .post(
     "/twilio/recording",
@@ -570,7 +733,11 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         ? { ...result, workflowStarted: true }
         : result
     },
-    {
-      detail: { summary: "Twilio recording webhook", tags: ["Twilio webhooks"] },
+	    {
+	      response: { 200: s.twilioRecordingWebhookResponse },
+	      detail: {
+        summary: "Twilio recording webhook",
+        tags: ["Twilio webhooks"],
+      },
     }
   )

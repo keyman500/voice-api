@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   RiArrowLeftSLine,
   RiArrowRightSLine,
+  RiBankCardLine,
   RiCloseLine,
   RiExternalLinkLine,
   RiFileList3Line,
@@ -65,6 +66,13 @@ const mainNav: NavItem[] = [
     href: "/dashboard/phone-numbers",
     label: "Numbers",
     icon: RiNumbersLine,
+    match: "prefix",
+  },
+  {
+    kind: "link",
+    href: "/dashboard/billing",
+    label: "Billing",
+    icon: RiBankCardLine,
     match: "prefix",
   },
   {

@@ -1,12 +1,16 @@
 import crypto from "node:crypto"
 import type { Body } from "files-sdk"
-import {
-  createVoiceRepository,
-  type VoiceRepository,
-} from "./voice-repository"
+import { createVoiceRepository, type VoiceRepository } from "./voice-repository"
 import { getFileStorage, type FileStorage } from "./file-storage"
 import { getLlmAdapter, type LlmAdapter } from "./llm-adapter"
 import { twilioAdapter, type TwilioAdapter } from "./twilio-adapter"
+import {
+  creditsForRuntime,
+  creditsForTokenUsage,
+  getBillingService,
+  type BillingService,
+  type TokenUsage,
+} from "./billing"
 import type {
   JsonAgent,
   JsonCall,
@@ -126,7 +130,11 @@ function webhookTimeoutMs(seconds: number | undefined) {
   return Math.max(1, Math.min(30, value)) * 1000
 }
 
-function relayOptions(agent: JsonAgent | null, callId: string, baseUrl?: string) {
+function relayOptions(
+  agent: JsonAgent | null,
+  callId: string,
+  baseUrl?: string
+) {
   const providerOptions = agent?.providerOptions
   const relay = providerOptionRecord(providerOptions, "conversationRelay")
   return {
@@ -140,20 +148,26 @@ function relayOptions(agent: JsonAgent | null, callId: string, baseUrl?: string)
     voice: agent?.voice?.voiceId ?? stringValue(relay?.voice),
     transcriptionProvider: stringValue(relay?.transcriptionProvider),
     speechModel: stringValue(relay?.speechModel),
-    interruptible: (stringValue(relay?.interruptible) as
-      | "none"
-      | "dtmf"
-      | "speech"
-      | "any"
-      | undefined) ?? "any",
-    interruptSensitivity: (stringValue(relay?.interruptSensitivity) as
-      | "high"
-      | "medium"
-      | "low"
-      | undefined) ?? "high",
-    reportInputDuringAgentSpeech: (stringValue(
-      relay?.reportInputDuringAgentSpeech
-    ) as "none" | "dtmf" | "speech" | "any" | undefined) ?? "any",
+    interruptible:
+      (stringValue(relay?.interruptible) as
+        | "none"
+        | "dtmf"
+        | "speech"
+        | "any"
+        | undefined) ?? "any",
+    interruptSensitivity:
+      (stringValue(relay?.interruptSensitivity) as
+        | "high"
+        | "medium"
+        | "low"
+        | undefined) ?? "high",
+    reportInputDuringAgentSpeech:
+      (stringValue(relay?.reportInputDuringAgentSpeech) as
+        | "none"
+        | "dtmf"
+        | "speech"
+        | "any"
+        | undefined) ?? "any",
     customParameters: {
       callId,
       agentId: agent?.id,
@@ -167,10 +181,35 @@ export function createVoiceRelayService(
   repo: VoiceRepository = createVoiceRepository(),
   twilio: TwilioAdapter = twilioAdapter,
   llm: LlmAdapter = getLlmAdapter(),
-  files: FileStorage = getFileStorage()
+  files: FileStorage = getFileStorage(),
+  billing: BillingService = getBillingService()
 ) {
   const activeGenerations = new Map<string, AbortController>()
   const recentFinalPrompts = new Map<string, { text: string; at: number }>()
+
+  async function recordAiUsage(input: {
+    userId: string
+    callId: string
+    agentId?: string
+    kind: "ai_tokens" | "post_call_analysis" | "success_evaluation"
+    model: string
+    usage?: TokenUsage
+  }) {
+    const priced = creditsForTokenUsage(input.model, input.usage ?? {})
+    if (!priced.priced || priced.credits <= 0) return null
+    return billing.recordUsage({
+      userId: input.userId,
+      callId: input.callId,
+      agentId: input.agentId,
+      kind: input.kind,
+      model: input.model,
+      usage: input.usage,
+      credits: priced.credits,
+      providerCostUsd: priced.providerCostUsd,
+      billableUsd: priced.billableUsd,
+      raw: { source: "ai-gateway" },
+    })
+  }
 
   return {
     async getTwilioConfig(userId: string): Promise<RedactedTwilioConfig> {
@@ -329,6 +368,7 @@ export function createVoiceRelayService(
       if (input.agentId && !agent) {
         throw new VoiceServiceError(400, "AGENT_NOT_FOUND", "agentId not found")
       }
+      await billing.assertCanStartCall(userId)
       const phone = input.phoneNumberId
         ? await repo.getPhoneNumber(userId, input.phoneNumberId)
         : null
@@ -361,7 +401,8 @@ export function createVoiceRelayService(
           "No user Twilio config or platform Twilio fallback is configured"
         )
       }
-      const fromNumber = phone?.number ?? input.fromNumber ?? credentials.defaultFromNumber
+      const fromNumber =
+        phone?.number ?? input.fromNumber ?? credentials.defaultFromNumber
       if (!fromNumber) {
         throw new VoiceServiceError(
           400,
@@ -419,7 +460,10 @@ export function createVoiceRelayService(
         })
         return (
           (await repo.updateCall(userId, call.id, {
-            status: normalizeStatus(created.status) === "unknown" ? "ringing" : normalizeStatus(created.status),
+            status:
+              normalizeStatus(created.status) === "unknown"
+                ? "ringing"
+                : normalizeStatus(created.status),
             twilioCallSid: created.sid,
             twilioAccountSid: created.accountSid ?? credentials.accountSid,
             providerSource: credentials.source,
@@ -427,7 +471,8 @@ export function createVoiceRelayService(
           })) ?? call
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Twilio request failed"
+        const message =
+          error instanceof Error ? error.message : "Twilio request failed"
         await repo.addCallEvent(userId, call.id, "call.error", {
           code: "TWILIO_REQUEST_FAILED",
           message,
@@ -453,7 +498,9 @@ export function createVoiceRelayService(
       const current = await repo.getCall(userId, id)
       if (!current) return null
       const endedAt =
-        input.status === "ended" || input.status === "error" ? new Date() : undefined
+        input.status === "ended" || input.status === "error"
+          ? new Date()
+          : undefined
       return repo.updateCall(userId, id, {
         metadata: input.metadata ?? current.metadata ?? null,
         providerOptions: input.providerOptions,
@@ -541,7 +588,8 @@ export function createVoiceRelayService(
         }
 
         const current =
-          existingBySid.get(remote.sid) ?? existingByNumber.get(remote.phoneNumber)
+          existingBySid.get(remote.sid) ??
+          existingByNumber.get(remote.phoneNumber)
         const providerOptions = {
           ...(current?.providerOptions ?? {}),
           twilioPhoneNumberSid: remote.sid,
@@ -573,7 +621,11 @@ export function createVoiceRelayService(
           : await repo.createPhoneNumber(userId, input)
         if (saved) imported.push(saved)
       }
-      return { items: imported, hasMore: false as const, imported: imported.length }
+      return {
+        items: imported,
+        hasMore: false as const,
+        imported: imported.length,
+      }
     },
 
     async createPhoneNumber(
@@ -599,7 +651,10 @@ export function createVoiceRelayService(
           input.providerOptions,
           "twilioPhoneNumberSid"
         ),
-        twilioAccountSid: providerOptionString(input.providerOptions, "twilioAccountSid"),
+        twilioAccountSid: providerOptionString(
+          input.providerOptions,
+          "twilioAccountSid"
+        ),
         providerOptions: input.providerOptions ?? null,
         raw: {},
       })
@@ -628,7 +683,10 @@ export function createVoiceRelayService(
           input.providerOptions,
           "twilioPhoneNumberSid"
         ),
-        twilioAccountSid: providerOptionString(input.providerOptions, "twilioAccountSid"),
+        twilioAccountSid: providerOptionString(
+          input.providerOptions,
+          "twilioAccountSid"
+        ),
       })
     },
 
@@ -646,10 +704,14 @@ export function createVoiceRelayService(
       if (!credentials) return false
       const candidates = new Set([input.url])
       if (credentials.defaultWebhookBaseUrl) {
-        candidates.add(replaceBaseUrl(input.url, credentials.defaultWebhookBaseUrl))
+        candidates.add(
+          replaceBaseUrl(input.url, credentials.defaultWebhookBaseUrl)
+        )
       }
       if (process.env.TWILIO_WEBHOOK_BASE_URL) {
-        candidates.add(replaceBaseUrl(input.url, process.env.TWILIO_WEBHOOK_BASE_URL))
+        candidates.add(
+          replaceBaseUrl(input.url, process.env.TWILIO_WEBHOOK_BASE_URL)
+        )
       }
       if (process.env.BETTER_AUTH_URL) {
         candidates.add(replaceBaseUrl(input.url, process.env.BETTER_AUTH_URL))
@@ -684,22 +746,81 @@ export function createVoiceRelayService(
       if (!call) {
         const toNumber = formValue(input.params, "To", "to")
         if (!toNumber) {
-          throw new VoiceServiceError(400, "TWILIO_TO_MISSING", "Twilio To is required")
+          throw new VoiceServiceError(
+            400,
+            "TWILIO_TO_MISSING",
+            "Twilio To is required"
+          )
         }
         const phone = await repo.findPhoneNumberByNumber(toNumber)
         if (!phone) {
-          throw new VoiceServiceError(404, "PHONE_NUMBER_NOT_FOUND", "Phone number not found")
+          throw new VoiceServiceError(
+            404,
+            "PHONE_NUMBER_NOT_FOUND",
+            "Phone number not found"
+          )
         }
         userId = phone.userId
-        if (!(await this.validateTwilioWebhook({ userId, url: input.url, params: input.params, signature: input.signature }))) {
-          throw new VoiceServiceError(401, "TWILIO_SIGNATURE_INVALID", "Invalid Twilio signature")
+        if (
+          !(await this.validateTwilioWebhook({
+            userId,
+            url: input.url,
+            params: input.params,
+            signature: input.signature,
+          }))
+        ) {
+          throw new VoiceServiceError(
+            401,
+            "TWILIO_SIGNATURE_INVALID",
+            "Invalid Twilio signature"
+          )
         }
-        credentialsBaseUrl = (
-          await repo.resolveTwilioCredentials(userId)
-        )?.defaultWebhookBaseUrl
+        credentialsBaseUrl = (await repo.resolveTwilioCredentials(userId))
+          ?.defaultWebhookBaseUrl
         agent = phone.inboundAgentId
           ? await repo.getAgent(userId, phone.inboundAgentId)
           : null
+        try {
+          await billing.assertCanStartCall(userId)
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "An active subscription is required to receive calls"
+          call = await repo.createCall(userId, {
+            id: crypto.randomUUID(),
+            userId,
+            agentId: phone.inboundAgentId,
+            direction: "inbound",
+            status: "error",
+            postCallStatus: "failed",
+            analysisStatus: "failed",
+            successEvaluationStatus: "failed",
+            webhookDeliveryStatus: "skipped",
+            toNumber,
+            fromNumber: formValue(input.params, "From", "from"),
+            phoneNumberId: phone.id,
+            twilioCallSid: formValue(input.params, "CallSid", "callSid"),
+            twilioAccountSid: formValue(
+              input.params,
+              "AccountSid",
+              "accountSid"
+            ),
+            providerSource: "user",
+            metadata: null,
+            providerOptions: null,
+            raw: {
+              twilio: input.params,
+              error: message,
+            },
+          })
+          await repo.addCallEvent(userId, call.id, "billing.call.blocked", {
+            phoneNumberId: phone.id,
+            toNumber,
+            reason: message,
+          })
+          return '<?xml version="1.0" encoding="UTF-8"?><Response><Say>This number needs an active subscription before it can receive calls. Please try again later.</Say></Response>'
+        }
         if (!agent) {
           call = await repo.createCall(userId, {
             id: crypto.randomUUID(),
@@ -715,7 +836,11 @@ export function createVoiceRelayService(
             fromNumber: formValue(input.params, "From", "from"),
             phoneNumberId: phone.id,
             twilioCallSid: formValue(input.params, "CallSid", "callSid"),
-            twilioAccountSid: formValue(input.params, "AccountSid", "accountSid"),
+            twilioAccountSid: formValue(
+              input.params,
+              "AccountSid",
+              "accountSid"
+            ),
             providerSource: "user",
             metadata: null,
             providerOptions: null,
@@ -724,11 +849,16 @@ export function createVoiceRelayService(
               error: "No inbound agent configured for phone number",
             },
           })
-          await repo.addCallEvent(userId, call.id, "twilio.voice.unconfigured", {
-            phoneNumberId: phone.id,
-            toNumber,
-            reason: "No inbound agent configured for phone number",
-          })
+          await repo.addCallEvent(
+            userId,
+            call.id,
+            "twilio.voice.unconfigured",
+            {
+              phoneNumberId: phone.id,
+              toNumber,
+              reason: "No inbound agent configured for phone number",
+            }
+          )
           return '<?xml version="1.0" encoding="UTF-8"?><Response><Say>This phone number is not configured yet. Please try again later.</Say></Response>'
         }
         call = await repo.createCall(userId, {
@@ -751,21 +881,40 @@ export function createVoiceRelayService(
           providerOptions: null,
           raw: { twilio: input.params },
         })
-        await repo.addCallEvent(userId, call.id, "twilio.voice.inbound", input.params)
+        await repo.addCallEvent(
+          userId,
+          call.id,
+          "twilio.voice.inbound",
+          input.params
+        )
       } else {
         if (!userId) {
-          throw new VoiceServiceError(400, "CALL_USER_MISSING", "Call user missing")
+          throw new VoiceServiceError(
+            400,
+            "CALL_USER_MISSING",
+            "Call user missing"
+          )
         }
-        if (!(await this.validateTwilioWebhook({ userId, url: input.url, params: input.params, signature: input.signature }))) {
+        if (
+          !(await this.validateTwilioWebhook({
+            userId,
+            url: input.url,
+            params: input.params,
+            signature: input.signature,
+          }))
+        ) {
           await repo.addCallEvent(userId, call.id, "twilio.voice.error", {
             code: "TWILIO_SIGNATURE_INVALID",
             url: input.url,
           })
-          throw new VoiceServiceError(401, "TWILIO_SIGNATURE_INVALID", "Invalid Twilio signature")
+          throw new VoiceServiceError(
+            401,
+            "TWILIO_SIGNATURE_INVALID",
+            "Invalid Twilio signature"
+          )
         }
-        credentialsBaseUrl = (
-          await repo.resolveTwilioCredentials(userId)
-        )?.defaultWebhookBaseUrl
+        credentialsBaseUrl = (await repo.resolveTwilioCredentials(userId))
+          ?.defaultWebhookBaseUrl
         agent = call.agentId ? await repo.getAgent(userId, call.agentId) : null
       }
       await repo.addCallEvent(userId, call.id, "twilio.voice.answered", {
@@ -801,13 +950,55 @@ export function createVoiceRelayService(
       )
       await repo.updateCall(userId, callId, {
         status,
-        twilioCallSid: formValue(input.params, "CallSid", "callSid", "call_sid"),
-        endedAt: status === "ended" || status === "error" ? new Date() : undefined,
+        twilioCallSid: formValue(
+          input.params,
+          "CallSid",
+          "callSid",
+          "call_sid"
+        ),
+        endedAt:
+          status === "ended" || status === "error" ? new Date() : undefined,
         duration: intFrom(
-          formValue(input.params, "CallDuration", "callDuration", "call_duration")
+          formValue(
+            input.params,
+            "CallDuration",
+            "callDuration",
+            "call_duration"
+          )
         ),
       })
-      await repo.addCallEvent(userId, callId, "twilio.call.status", input.params)
+      await repo.addCallEvent(
+        userId,
+        callId,
+        "twilio.call.status",
+        input.params
+      )
+      if (status === "ended" || status === "error") {
+        const durationSeconds = intFrom(
+          formValue(
+            input.params,
+            "CallDuration",
+            "callDuration",
+            "call_duration"
+          )
+        )
+        const credits = creditsForRuntime(durationSeconds)
+        if (credits > 0) {
+          await billing.recordUsage({
+            userId,
+            callId,
+            agentId: found?.agentId ?? undefined,
+            kind: "call_runtime",
+            durationSeconds,
+            credits,
+            raw: {
+              source: "twilio.status",
+              status,
+              params: input.params,
+            },
+          })
+        }
+      }
       return { ok: true as const, matched: true }
     },
 
@@ -822,14 +1013,24 @@ export function createVoiceRelayService(
         input.userId ?? found?.userId ?? process.env.TWILIO_WEBHOOK_USER_ID
       if (!userId || !callId) return { ok: true as const, matched: false }
       await repo.updateCall(userId, callId, {
-        recordingSid: formValue(input.params, "RecordingSid", "recordingSid", "recording_sid"),
+        recordingSid: formValue(
+          input.params,
+          "RecordingSid",
+          "recordingSid",
+          "recording_sid"
+        ),
         recordingStatus: formValue(
           input.params,
           "RecordingStatus",
           "recordingStatus",
           "recording_status"
         ),
-        recordingUrl: formValue(input.params, "RecordingUrl", "recordingUrl", "recording_url"),
+        recordingUrl: formValue(
+          input.params,
+          "RecordingUrl",
+          "recordingUrl",
+          "recording_url"
+        ),
         postCallStatus: "pending",
         analysisStatus: "pending",
         recordingIngestionError: null,
@@ -866,9 +1067,14 @@ export function createVoiceRelayService(
         postCallStatus: "processing",
         analysisStatus: "pending",
       })
-      await repo.addCallEvent(input.userId, input.callId, "post_call.workflow.started", {
-        runId: input.runId,
-      })
+      await repo.addCallEvent(
+        input.userId,
+        input.callId,
+        "post_call.workflow.started",
+        {
+          runId: input.runId,
+        }
+      )
     },
 
     async markPostCallWorkflowFailed(input: {
@@ -880,9 +1086,14 @@ export function createVoiceRelayService(
         postCallStatus: "failed",
         recordingIngestionError: input.error,
       })
-      await repo.addCallEvent(input.userId, input.callId, "post_call.workflow.failed", {
-        message: input.error,
-      })
+      await repo.addCallEvent(
+        input.userId,
+        input.callId,
+        "post_call.workflow.failed",
+        {
+          message: input.error,
+        }
+      )
     },
 
     async ingestRecording(input: {
@@ -901,14 +1112,22 @@ export function createVoiceRelayService(
         recordingSizeBytes: uploaded.size,
         recordingIngestedAt: new Date(),
       })
-      await repo.addCallEvent(input.userId, input.callId, "recording.stored", uploaded)
+      await repo.addCallEvent(
+        input.userId,
+        input.callId,
+        "recording.stored",
+        uploaded
+      )
       return uploaded
     },
 
     async downloadRecording(userId: string, callId: string) {
       const call = await repo.getCall(userId, callId)
       if (!call?.recordingStorageKey) {
-        if (call?.postCallStatus === "pending" || call?.postCallStatus === "processing") {
+        if (
+          call?.postCallStatus === "pending" ||
+          call?.postCallStatus === "processing"
+        ) {
           throw new VoiceServiceError(
             202,
             "RECORDING_PROCESSING",
@@ -922,7 +1141,11 @@ export function createVoiceRelayService(
             call.recordingIngestionError ?? "Recording ingestion failed"
           )
         }
-        throw new VoiceServiceError(404, "RECORDING_NOT_FOUND", "Recording not found")
+        throw new VoiceServiceError(
+          404,
+          "RECORDING_NOT_FOUND",
+          "Recording not found"
+        )
       }
       return files.downloadRecording(call.recordingStorageKey)
     },
@@ -967,11 +1190,16 @@ export function createVoiceRelayService(
         await repo.updateCall(input.userId, input.callId, {
           recordingStatus: metadata.status ?? call.recordingStatus,
         })
-        await repo.addCallEvent(input.userId, input.callId, "twilio.recording.metadata", {
-          recordingSid,
-          status: metadata.status,
-          duration: metadata.duration,
-        })
+        await repo.addCallEvent(
+          input.userId,
+          input.callId,
+          "twilio.recording.metadata",
+          {
+            recordingSid,
+            status: metadata.status,
+            duration: metadata.duration,
+          }
+        )
         if (metadata.status && metadata.status !== "completed") {
           throw new VoiceServiceError(
             409,
@@ -979,7 +1207,10 @@ export function createVoiceRelayService(
             `Twilio recording is ${metadata.status}`
           )
         }
-        const media = await twilio.fetchRecordingMedia(credentials, recordingSid)
+        const media = await twilio.fetchRecordingMedia(
+          credentials,
+          recordingSid
+        )
         const uploaded = await files.uploadRecording({
           callId: input.callId,
           recordingSid,
@@ -995,37 +1226,61 @@ export function createVoiceRelayService(
           recordingIngestedAt: new Date(),
           postCallStatus: "ready",
         })
-        await repo.addCallEvent(input.userId, input.callId, "recording.stored", {
-          ...uploaded,
-          verified: true,
-        })
+        await repo.addCallEvent(
+          input.userId,
+          input.callId,
+          "recording.stored",
+          {
+            ...uploaded,
+            verified: true,
+          }
+        )
 
         if (credentials.deleteTwilioRecordingAfterBlobUpload) {
           await twilio.deleteRecording(credentials, recordingSid)
           await repo.updateCall(input.userId, input.callId, {
             recordingDeletedFromTwilioAt: new Date(),
           })
-          await repo.addCallEvent(input.userId, input.callId, "twilio.recording.deleted", {
-            recordingSid,
-          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "twilio.recording.deleted",
+            {
+              recordingSid,
+            }
+          )
         }
 
         let analysisResult: Record<string, unknown> | undefined
         try {
           const refreshed = await repo.getCall(input.userId, input.callId)
-          const analysis = await llm.analyzeCall({
+          const analysisResponse = await llm.analyzeCall({
             callId: input.callId,
             transcript: refreshed?.transcript ?? call.transcript,
             events: refreshed?.events,
+          })
+          const analysis = analysisResponse.analysis
+          await recordAiUsage({
+            userId: input.userId,
+            callId: input.callId,
+            agentId: refreshed?.agentId ?? call.agentId ?? undefined,
+            kind: "post_call_analysis",
+            model: analysisResponse.model,
+            usage: analysisResponse.usage,
           })
           analysisResult = analysis
           await repo.updateCall(input.userId, input.callId, {
             analysis,
             analysisStatus: "ready",
           })
-          await repo.addCallEvent(input.userId, input.callId, "analysis.ready", {
-            keys: Object.keys(analysis),
-          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "analysis.ready",
+            {
+              keys: Object.keys(analysis),
+            }
+          )
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Call analysis failed"
@@ -1033,9 +1288,14 @@ export function createVoiceRelayService(
             analysisStatus: "failed",
             analysisError: message,
           })
-          await repo.addCallEvent(input.userId, input.callId, "analysis.failed", {
-            message,
-          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "analysis.failed",
+            {
+              message,
+            }
+          )
         }
 
         try {
@@ -1043,14 +1303,26 @@ export function createVoiceRelayService(
           const agent = refreshed?.agentId
             ? await repo.getAgent(input.userId, refreshed.agentId)
             : null
-          const successEvaluation = await llm.evaluateCallSuccess({
+          const successResponse = await llm.evaluateCallSuccess({
             callId: input.callId,
             transcript: refreshed?.transcript ?? call.transcript,
             successEvaluationPrompt: agent?.successEvaluationPrompt,
             analysis: analysisResult ?? refreshed?.analysis,
           })
+          const successEvaluation = successResponse.evaluation
+          await recordAiUsage({
+            userId: input.userId,
+            callId: input.callId,
+            agentId: refreshed?.agentId ?? call.agentId ?? undefined,
+            kind: "success_evaluation",
+            model: successResponse.model,
+            usage: successResponse.usage,
+          })
           const nextAnalysis = {
-            ...((analysisResult ?? refreshed?.analysis ?? {}) as Record<string, unknown>),
+            ...((analysisResult ?? refreshed?.analysis ?? {}) as Record<
+              string,
+              unknown
+            >),
             successEvaluation,
           }
           await repo.updateCall(input.userId, input.callId, {
@@ -1067,9 +1339,7 @@ export function createVoiceRelayService(
           )
         } catch (error) {
           const message =
-            error instanceof Error
-              ? error.message
-              : "Success evaluation failed"
+            error instanceof Error ? error.message : "Success evaluation failed"
           await repo.updateCall(input.userId, input.callId, {
             successEvaluationStatus: "failed",
             successEvaluationError: message,
@@ -1089,9 +1359,14 @@ export function createVoiceRelayService(
           error.code === "RECORDING_NOT_READY" &&
           input.failOnNotReady === false
         ) {
-          await repo.addCallEvent(input.userId, input.callId, "post_call.waiting", {
-            message: error.message,
-          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "post_call.waiting",
+            {
+              message: error.message,
+            }
+          )
           throw error
         }
         const message =
@@ -1104,9 +1379,14 @@ export function createVoiceRelayService(
           successEvaluationStatus: "failed",
           successEvaluationError: message,
         })
-        await repo.addCallEvent(input.userId, input.callId, "post_call.failed", {
-          message,
-        })
+        await repo.addCallEvent(
+          input.userId,
+          input.callId,
+          "post_call.failed",
+          {
+            message,
+          }
+        )
         throw error
       }
     },
@@ -1136,7 +1416,10 @@ export function createVoiceRelayService(
         return { ok: true as const, skipped: true as const }
       }
 
-      const secret = await repo.resolveAgentWebhookSecret(input.userId, agent.id)
+      const secret = await repo.resolveAgentWebhookSecret(
+        input.userId,
+        agent.id
+      )
       if (!secret) {
         const message = "Agent webhook secret is required for signed delivery"
         await repo.updateCall(input.userId, input.callId, {
@@ -1208,10 +1491,15 @@ export function createVoiceRelayService(
           webhookDeliveryError: null,
           webhookDeliveredAt: new Date(),
         })
-        await repo.addCallEvent(input.userId, input.callId, "webhook.delivered", {
-          attempt: input.attempt,
-          status: response.status,
-        })
+        await repo.addCallEvent(
+          input.userId,
+          input.callId,
+          "webhook.delivered",
+          {
+            attempt: input.attempt,
+            status: response.status,
+          }
+        )
         return { ok: true as const, skipped: false as const }
       } catch (error) {
         const message =
@@ -1240,15 +1528,22 @@ export function createVoiceRelayService(
     }) {
       const type = stringValue(input.message.type)
       const call = await repo.getCall(input.userId, input.callId)
-      if (!call) throw new VoiceServiceError(404, "CALL_NOT_FOUND", "Call not found")
-      await repo.addCallEvent(input.userId, input.callId, `relay.${type ?? "message"}`, input.message)
+      if (!call)
+        throw new VoiceServiceError(404, "CALL_NOT_FOUND", "Call not found")
+      await repo.addCallEvent(
+        input.userId,
+        input.callId,
+        `relay.${type ?? "message"}`,
+        input.message
+      )
 
       if (type === "setup") {
         await repo.updateCall(input.userId, input.callId, {
           status: "in-progress",
           startedAt: new Date(),
           relaySessionId: stringValue(input.message.sessionId),
-          twilioCallSid: stringValue(input.message.callSid) ?? call.twilioCallSid,
+          twilioCallSid:
+            stringValue(input.message.callSid) ?? call.twilioCallSid,
           twilioAccountSid:
             stringValue(input.message.accountSid) ?? call.twilioAccountSid,
         })
@@ -1262,7 +1557,12 @@ export function createVoiceRelayService(
           const recent = recentFinalPrompts.get(input.callId)
           const nowMs = Date.now()
           if (recent?.text === text && nowMs - recent.at < 1500) {
-            await repo.addCallEvent(input.userId, input.callId, "relay.prompt.duplicate", input.message)
+            await repo.addCallEvent(
+              input.userId,
+              input.callId,
+              "relay.prompt.duplicate",
+              input.message
+            )
             return { ok: true as const, deduped: true as const }
           }
           recentFinalPrompts.set(input.callId, { text, at: nowMs })
@@ -1277,50 +1577,92 @@ export function createVoiceRelayService(
           raw: input.message,
         })
         await repo.updateCall(input.userId, input.callId, {
-          transcript: [...items.map((item) => transcriptLine(item.role, item.text)), transcriptLine("user", text)].join("\n"),
+          transcript: [
+            ...items.map((item) => transcriptLine(item.role, item.text)),
+            transcriptLine("user", text),
+          ].join("\n"),
         })
-        const agent = call.agentId ? await repo.getAgent(input.userId, call.agentId) : null
+        const agent = call.agentId
+          ? await repo.getAgent(input.userId, call.agentId)
+          : null
         if (agent && input.message.last !== false && input.send) {
           activeGenerations.get(input.callId)?.abort()
           const controller = new AbortController()
           activeGenerations.set(input.callId, controller)
           const messages = [
             ...items.map((item) => ({
-              role: item.role === "assistant" ? "assistant" as const : "user" as const,
+              role:
+                item.role === "assistant"
+                  ? ("assistant" as const)
+                  : ("user" as const),
               content: item.text,
             })),
             { role: "user" as const, content: text },
           ]
           let assistantText = ""
           try {
-            for await (const token of llm.streamResponse({
+            const llmResponse = llm.streamResponse({
               agent,
               callId: input.callId,
               messages,
               signal: controller.signal,
-            })) {
+            })
+            for await (const token of llmResponse.textStream) {
               assistantText += token
-              input.send({ type: "text", token, last: false, interruptible: true })
+              input.send({
+                type: "text",
+                token,
+                last: false,
+                interruptible: true,
+              })
             }
+            await recordAiUsage({
+              userId: input.userId,
+              callId: input.callId,
+              agentId: agent.id,
+              kind: "ai_tokens",
+              model: llmResponse.model,
+              usage: await llmResponse.usage.catch(() => ({})),
+            })
           } catch (error) {
             const aborted = controller.signal.aborted
             const message =
-              error instanceof Error ? error.message : "Assistant generation failed"
-            await repo.addCallEvent(input.userId, input.callId, "relay.llm.error", {
-              message,
-              aborted,
-            })
+              error instanceof Error
+                ? error.message
+                : "Assistant generation failed"
+            await repo.addCallEvent(
+              input.userId,
+              input.callId,
+              "relay.llm.error",
+              {
+                message,
+                aborted,
+              }
+            )
             if (aborted) return { ok: true as const, aborted: true as const }
-            input.send({ type: "text", token: "", last: true, interruptible: true })
+            input.send({
+              type: "text",
+              token: "",
+              last: true,
+              interruptible: true,
+            })
             return { ok: true as const, error: "LLM_STREAM_FAILED" as const }
           } finally {
             if (activeGenerations.get(input.callId) === controller) {
               activeGenerations.delete(input.callId)
             }
           }
-          input.send({ type: "text", token: "", last: true, interruptible: true })
+          input.send({
+            type: "text",
+            token: "",
+            last: true,
+            interruptible: true,
+          })
           if (assistantText.trim().length > 0) {
-            const nextItems = await repo.listTranscriptItems(input.userId, input.callId)
+            const nextItems = await repo.listTranscriptItems(
+              input.userId,
+              input.callId
+            )
             await repo.addTranscriptItem(input.userId, {
               callId: input.callId,
               role: "assistant",

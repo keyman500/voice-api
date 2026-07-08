@@ -3,16 +3,18 @@ import { VOICE_API_PROVIDER_ID } from "@/lib/voice-constants"
 
 jest.mock("@/lib/resolve-user")
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { resolveAuthedContext } = require("@/lib/resolve-user")
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { setVoiceRelayServiceForTests } = require("@/lib/services/voice-relay-service")
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { setPostCallWorkflowStarterForTests } = require("@/lib/services/post-call-workflow-runner")
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+const {
+  setVoiceRelayServiceForTests,
+} = require("@/lib/services/voice-relay-service")
+const {
+  setPostCallWorkflowStarterForTests,
+} = require("@/lib/services/post-call-workflow-runner")
 const { VoiceServiceError } = require("@/lib/services")
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { setBillingServiceForTests } = require("@/lib/services/billing")
 const { app } = require("@/lib/api")
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 const fakeUser = {
   id: "relay-user-1",
@@ -58,23 +60,27 @@ function createMockRelayService() {
       providerSource: twilioConfigured ? "user" : "none",
       accountSidPrefix: twilioConfigured ? "AC123456" : undefined,
       defaultFromNumber: twilioConfigured ? "+15555550123" : undefined,
-      defaultWebhookBaseUrl: twilioConfigured ? "https://voice.example.com" : undefined,
+      defaultWebhookBaseUrl: twilioConfigured
+        ? "https://voice.example.com"
+        : undefined,
       deleteTwilioRecordingAfterBlobUpload: false,
       updatedAt: twilioConfigured ? "2024-01-01T00:00:00.000Z" : undefined,
     })),
-    upsertTwilioConfig: jest.fn(async (_userId: string, input: Record<string, unknown>) => {
-      twilioConfigured = true
-      return {
-        configured: true,
-        providerSource: "user",
-        accountSidPrefix: String(input.accountSid).slice(0, 8),
-        defaultFromNumber: input.defaultFromNumber,
-        defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
-        deleteTwilioRecordingAfterBlobUpload:
-          input.deleteTwilioRecordingAfterBlobUpload ?? false,
-        updatedAt: "2024-01-01T00:00:00.000Z",
+    upsertTwilioConfig: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => {
+        twilioConfigured = true
+        return {
+          configured: true,
+          providerSource: "user",
+          accountSidPrefix: String(input.accountSid).slice(0, 8),
+          defaultFromNumber: input.defaultFromNumber,
+          defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
+          deleteTwilioRecordingAfterBlobUpload:
+            input.deleteTwilioRecordingAfterBlobUpload ?? false,
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        }
       }
-    }),
+    ),
     deleteTwilioConfig: jest.fn(async () => {
       const wasConfigured = twilioConfigured
       twilioConfigured = false
@@ -94,70 +100,86 @@ function createMockRelayService() {
       items: Array.from(agents.values()),
       hasMore: false,
     })),
-    getAgent: jest.fn(async (_userId: string, id: string) => agents.get(id) ?? null),
-    createAgent: jest.fn(async (_userId: string, input: Record<string, unknown>) => {
-      const agent = {
-        id: "agent-1",
-        provider: VOICE_API_PROVIDER_ID,
-        name: input.name,
-        successEvaluationPrompt: input.successEvaluationPrompt,
-        webhookUrl: input.webhookUrl,
-        webhookTimeoutSeconds: input.webhookTimeoutSeconds,
-        webhookSecretConfigured: Boolean(input.webhookSecret),
-        raw: {},
+    getAgent: jest.fn(
+      async (_userId: string, id: string) => agents.get(id) ?? null
+    ),
+    createAgent: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => {
+        const agent = {
+          id: "agent-1",
+          provider: VOICE_API_PROVIDER_ID,
+          name: input.name,
+          successEvaluationPrompt: input.successEvaluationPrompt,
+          webhookUrl: input.webhookUrl,
+          webhookTimeoutSeconds: input.webhookTimeoutSeconds,
+          webhookSecretConfigured: Boolean(input.webhookSecret),
+          raw: {},
+        }
+        agents.set(agent.id, agent)
+        return agent
       }
-      agents.set(agent.id, agent)
-      return agent
-    }),
-    updateAgent: jest.fn(async (_userId: string, id: string, input: Record<string, unknown>) => {
-      const current = agents.get(id)
-      if (!current) return null
-      const next = { ...current, ...input }
-      agents.set(id, next)
-      return next
-    }),
-    deleteAgent: jest.fn(async (_userId: string, id: string) => agents.delete(id)),
+    ),
+    updateAgent: jest.fn(
+      async (_userId: string, id: string, input: Record<string, unknown>) => {
+        const current = agents.get(id)
+        if (!current) return null
+        const next = { ...current, ...input }
+        agents.set(id, next)
+        return next
+      }
+    ),
+    deleteAgent: jest.fn(async (_userId: string, id: string) =>
+      agents.delete(id)
+    ),
     listCalls: jest.fn(async () => ({
       items: Array.from(calls.values()),
       hasMore: false,
     })),
-    getCall: jest.fn(async (_userId: string, id: string) => calls.get(id) ?? null),
-    createCall: jest.fn(async (_userId: string, input: Record<string, unknown>) => {
-      if (!twilioConfigured) {
-        throw new VoiceServiceError(
-          400,
-          "TWILIO_CONFIG_MISSING",
-          "No user Twilio config or platform Twilio fallback is configured"
-        )
+    getCall: jest.fn(
+      async (_userId: string, id: string) => calls.get(id) ?? null
+    ),
+    createCall: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => {
+        if (!twilioConfigured) {
+          throw new VoiceServiceError(
+            400,
+            "TWILIO_CONFIG_MISSING",
+            "No user Twilio config or platform Twilio fallback is configured"
+          )
+        }
+        const call = {
+          id: "call-1",
+          provider: VOICE_API_PROVIDER_ID,
+          agentId: input.agentId,
+          phoneNumberId: input.phoneNumberId,
+          toNumber: input.toNumber,
+          fromNumber: input.fromNumber ?? "+15555550123",
+          status: "ringing",
+          twilioCallSid: "CA123",
+          twilioAccountSid: "AC123",
+          recordingSid: "RE123",
+          postCallStatus: "processing",
+          callSuccessful: true,
+          successEvaluationStatus: "ready",
+          successEvaluationReason: "The call was successful.",
+          raw: { twilio: { sid: "CA123" } },
+        }
+        calls.set(call.id, call)
+        return call
       }
-      const call = {
-        id: "call-1",
-        provider: VOICE_API_PROVIDER_ID,
-        agentId: input.agentId,
-        phoneNumberId: input.phoneNumberId,
-        toNumber: input.toNumber,
-        fromNumber: input.fromNumber ?? "+15555550123",
-        status: "ringing",
-        twilioCallSid: "CA123",
-        twilioAccountSid: "AC123",
-        recordingSid: "RE123",
-        postCallStatus: "processing",
-        callSuccessful: true,
-        successEvaluationStatus: "ready",
-        successEvaluationReason: "The call was successful.",
-        raw: { twilio: { sid: "CA123" } },
+    ),
+    updateCall: jest.fn(
+      async (_userId: string, id: string, input: Record<string, unknown>) => {
+        const current = calls.get(id)
+        if (!current) return null
+        const next = { ...current, ...input }
+        calls.set(id, next)
+        return next
       }
-      calls.set(call.id, call)
-      return call
-    }),
-    updateCall: jest.fn(async (_userId: string, id: string, input: Record<string, unknown>) => {
-      const current = calls.get(id)
-      if (!current) return null
-      const next = { ...current, ...input }
-      calls.set(id, next)
-      return next
-    }),
-    deleteCall: jest.fn(async (_userId: string, id: string) => calls.delete(id)),
+    ),
+    deleteCall: jest.fn(async (_userId: string, id: string) =>
+      calls.delete(id)
+    ),
     downloadRecording: jest.fn(async () => {
       const bytes = new TextEncoder().encode("audio bytes")
       return new File([bytes], "recording.mp3", { type: "audio/mpeg" })
@@ -186,19 +208,22 @@ function createMockRelayService() {
       return { items: [phone], hasMore: false, imported: 1 }
     }),
     getPhoneNumber: jest.fn(async () => null),
-    createPhoneNumber: jest.fn(async (_userId: string, input: Record<string, unknown>) => ({
-      id: "phone-1",
-      provider: VOICE_API_PROVIDER_ID,
-      number: input.number,
-      inboundAgentId: input.inboundAgentId,
-      outboundAgentId: input.outboundAgentId,
-      agentId: input.inboundAgentId,
-      raw: {},
-    })),
+    createPhoneNumber: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => ({
+        id: "phone-1",
+        provider: VOICE_API_PROVIDER_ID,
+        number: input.number,
+        inboundAgentId: input.inboundAgentId,
+        outboundAgentId: input.outboundAgentId,
+        agentId: input.inboundAgentId,
+        raw: {},
+      })
+    ),
     updatePhoneNumber: jest.fn(async () => null),
     deletePhoneNumber: jest.fn(async () => false),
-    handleVoiceWebhook: jest.fn(async () =>
-      '<?xml version="1.0" encoding="UTF-8"?><Response><Connect><ConversationRelay url="wss://voice.example.com/api/v1/relay/ws?callId=call-1" /></Connect></Response>'
+    handleVoiceWebhook: jest.fn(
+      async () =>
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Connect><ConversationRelay url="wss://voice.example.com/api/v1/relay/ws?callId=call-1" /></Connect></Response>'
     ),
     handleStatusWebhook: jest.fn(async () => ({ ok: true, matched: true })),
     handleRecordingWebhook: jest.fn(async () => ({
@@ -215,10 +240,77 @@ function createMockRelayService() {
   }
 }
 
+function createMockBillingService() {
+  const plans = {
+    starter: {
+      id: "starter",
+      name: "Starter",
+      priceUsd: 29,
+      includedCredits: 1000,
+      productEnv: "POLAR_STARTER_PRODUCT_ID",
+    },
+    pro: {
+      id: "pro",
+      name: "Pro",
+      priceUsd: 99,
+      includedCredits: 5000,
+      productEnv: "POLAR_PRO_PRODUCT_ID",
+    },
+  }
+  return {
+    plans,
+    modelPricing: jest.fn(() => ({
+      eventName: "voice_credit_usage",
+      creditUsd: 0.01,
+      aiMarkup: 1.5,
+      runtimeCreditsPerStartedMinute: 1,
+      models: [
+        {
+          model: "openai/gpt-4o-mini",
+          inputUsdPerToken: 0.00000015,
+          outputUsdPerToken: 0.0000006,
+          source: "ai-gateway",
+          inputCreditsPer1kTokens: 0.0225,
+          outputCreditsPer1kTokens: 0.09,
+        },
+      ],
+    })),
+    status: jest.fn(async () => ({
+      configured: true,
+      active: true,
+      plan: {
+        id: "starter",
+        name: "Starter",
+        includedCredits: 1000,
+        priceUsd: 29,
+        subscriptionStatus: "active",
+      },
+      plans,
+      credits: {
+        used: 125,
+        credited: 1000,
+        balance: 875,
+        estimatedOverageCredits: 0,
+      },
+      recentUsage: [],
+    })),
+    assertCanStartCall: jest.fn(async () => true),
+    checkout: jest.fn(async (_userId: string, plan: string) => ({
+      url: `https://polar.example/checkout/${plan}`,
+      plan,
+    })),
+    portal: jest.fn(async () => ({ url: "https://polar.example/portal" })),
+    recordUsage: jest.fn(async (input: unknown) => input),
+  }
+}
+
 beforeEach(() => {
   authed()
   setVoiceRelayServiceForTests(createMockRelayService())
-  setPostCallWorkflowStarterForTests(async (_input: unknown) => ({ runId: "run-1" }))
+  setBillingServiceForTests(createMockBillingService() as never)
+  setPostCallWorkflowStarterForTests(async (_input: unknown) => ({
+    runId: "run-1",
+  }))
 })
 
 describe("/api/v1 relay routes", () => {
@@ -226,6 +318,55 @@ describe("/api/v1 relay routes", () => {
     jest.mocked(resolveAuthedContext).mockResolvedValue(null)
     const res = await handle("/api/v1/agents")
     expect(res.status).toBe(401)
+  })
+
+  it("GET /api/v1/billing/status requires auth", async () => {
+    jest.mocked(resolveAuthedContext).mockResolvedValue(null)
+    const res = await handle("/api/v1/billing/status")
+    expect(res.status).toBe(401)
+  })
+
+  it("GET /api/v1/billing/status returns plan and credit fields", async () => {
+    const res = await handle("/api/v1/billing/status")
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({
+      active: true,
+      plan: { id: "starter", includedCredits: 1000 },
+      credits: { used: 125, credited: 1000, balance: 875 },
+    })
+  })
+
+  it("POST /api/v1/billing/checkout returns a Polar checkout URL", async () => {
+    const res = await handle("/api/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan: "pro" }),
+    })
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      url: "https://polar.example/checkout/pro",
+      plan: "pro",
+    })
+  })
+
+  it("POST /api/v1/billing/portal returns a Polar portal URL", async () => {
+    const res = await handle("/api/v1/billing/portal", { method: "POST" })
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      url: "https://polar.example/portal",
+    })
+  })
+
+  it("GET /api/v1/billing/model-pricing returns credit rates", async () => {
+    const res = await handle("/api/v1/billing/model-pricing")
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toMatchObject({
+      eventName: "voice_credit_usage",
+      creditUsd: 0.01,
+      runtimeCreditsPerStartedMinute: 1,
+    })
+    expect(body.models[0]).toMatchObject({ model: "openai/gpt-4o-mini" })
   })
 
   it("PUT /api/v1/twilio-config stores config without returning secrets", async () => {
@@ -415,7 +556,10 @@ describe("/api/v1 relay routes", () => {
   it("GET /api/v1/calls/:id/recording streams private storage bytes", async () => {
     await handle("/api/v1/twilio-config", {
       method: "PUT",
-      body: JSON.stringify({ accountSid: "AC123456789", authToken: "secret-token" }),
+      body: JSON.stringify({
+        accountSid: "AC123456789",
+        authToken: "secret-token",
+      }),
     })
     await handle("/api/v1/calls", {
       method: "POST",
@@ -428,7 +572,9 @@ describe("/api/v1 relay routes", () => {
   })
 
   it("POST /api/v1/twilio/recording starts post-call workflow after metadata", async () => {
-    const starter = jest.fn(async (_input: unknown) => ({ runId: "run-recording-1" }))
+    const starter = jest.fn(async (_input: unknown) => ({
+      runId: "run-recording-1",
+    }))
     setPostCallWorkflowStarterForTests(starter)
 
     const res = await handle("/api/v1/twilio/recording?callId=call-1", {
@@ -455,13 +601,18 @@ describe("/api/v1 relay routes", () => {
   it("POST /api/v1/calls/:id/post-call/retry restarts post-call workflow", async () => {
     await handle("/api/v1/twilio-config", {
       method: "PUT",
-      body: JSON.stringify({ accountSid: "AC123456789", authToken: "secret-token" }),
+      body: JSON.stringify({
+        accountSid: "AC123456789",
+        authToken: "secret-token",
+      }),
     })
     await handle("/api/v1/calls", {
       method: "POST",
       body: JSON.stringify({ toNumber: "+15555550100" }),
     })
-    const starter = jest.fn(async (_input: unknown) => ({ runId: "run-retry-1" }))
+    const starter = jest.fn(async (_input: unknown) => ({
+      runId: "run-retry-1",
+    }))
     setPostCallWorkflowStarterForTests(starter)
 
     const res = await handle("/api/v1/calls/call-1/post-call/retry", {

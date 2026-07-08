@@ -1,5 +1,6 @@
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -185,7 +186,10 @@ export const voiceAgent = pgTable(
     webhookTimeoutSeconds: integer("webhook_timeout_seconds"),
     encryptedWebhookSecret: text("encrypted_webhook_secret"),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
-    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<
+      string,
+      unknown
+    > | null>(),
     raw: jsonb("raw").$type<Record<string, unknown> | null>(),
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
@@ -207,8 +211,12 @@ export const voiceCall = pgTable(
     agentId: text("agent_id").references(() => voiceAgent.id, {
       onDelete: "set null",
     }),
-    direction: text("direction").notNull().$defaultFn(() => "outbound"),
-    status: text("status").notNull().$defaultFn(() => "queued"),
+    direction: text("direction")
+      .notNull()
+      .$defaultFn(() => "outbound"),
+    status: text("status")
+      .notNull()
+      .$defaultFn(() => "queued"),
     toNumber: text("to_number"),
     fromNumber: text("from_number"),
     phoneNumberId: text("phone_number_id"),
@@ -241,7 +249,9 @@ export const voiceCall = pgTable(
     webhookDeliveryError: text("webhook_delivery_error"),
     webhookLastAttemptAt: timestamp("webhook_last_attempt_at"),
     webhookDeliveredAt: timestamp("webhook_delivered_at"),
-    providerSource: text("provider_source").notNull().$defaultFn(() => "user"),
+    providerSource: text("provider_source")
+      .notNull()
+      .$defaultFn(() => "user"),
     startedAt: timestamp("started_at"),
     endedAt: timestamp("ended_at"),
     duration: integer("duration"),
@@ -249,7 +259,10 @@ export const voiceCall = pgTable(
     recordingUrl: text("recording_url"),
     analysis: jsonb("analysis").$type<Record<string, unknown> | null>(),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
-    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<
+      string,
+      unknown
+    > | null>(),
     raw: jsonb("raw").$type<Record<string, unknown> | null>(),
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
@@ -287,7 +300,10 @@ export const voicePhoneNumber = pgTable(
     twilioPhoneNumberSid: text("twilio_phone_number_sid"),
     twilioAccountSid: text("twilio_account_sid"),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
-    providerOptions: jsonb("provider_options").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<
+      string,
+      unknown
+    > | null>(),
     raw: jsonb("raw").$type<Record<string, unknown> | null>(),
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
@@ -311,7 +327,9 @@ export const voiceTranscriptItem = pgTable(
       .references(() => voiceCall.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
     text: text("text").notNull(),
-    status: text("status").notNull().$defaultFn(() => "final"),
+    status: text("status")
+      .notNull()
+      .$defaultFn(() => "final"),
     sequence: integer("sequence").notNull(),
     raw: jsonb("raw").$type<Record<string, unknown> | null>(),
     createdAt: timestamp("created_at")
@@ -346,5 +364,46 @@ export const voiceCallEvent = pgTable(
   (table) => [
     index("voice_call_event_call_id_idx").on(table.callId),
     index("voice_call_event_user_id_idx").on(table.userId),
+  ]
+)
+
+export const usageLedger = pgTable(
+  "usage_ledger",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    callId: text("call_id"),
+    agentId: text("agent_id"),
+    kind: text("kind").notNull(),
+    eventName: text("event_name").notNull(),
+    model: text("model"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+    durationSeconds: integer("duration_seconds"),
+    credits: doublePrecision("credits").notNull(),
+    providerCostUsd: doublePrecision("provider_cost_usd"),
+    billableUsd: doublePrecision("billable_usd"),
+    markup: doublePrecision("markup"),
+    polarEventId: text("polar_event_id"),
+    polarIngestStatus: text("polar_ingest_status")
+      .$defaultFn(() => "pending")
+      .notNull(),
+    polarIngestError: text("polar_ingest_error"),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("usage_ledger_user_id_idx").on(table.userId),
+    index("usage_ledger_call_id_idx").on(table.callId),
+    index("usage_ledger_kind_idx").on(table.kind),
+    index("usage_ledger_polar_ingest_status_idx").on(table.polarIngestStatus),
   ]
 )

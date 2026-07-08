@@ -46,6 +46,15 @@ import {
 import type { AgentListResponse } from "@/lib/dashboard"
 import type { JsonAgent } from "@/lib/services/voice-types"
 
+type ModelPricingResponse = {
+  runtimeCreditsPerStartedMinute: number
+  models: Array<{
+    model: string
+    inputCreditsPer1kTokens: number
+    outputCreditsPer1kTokens: number
+  }>
+}
+
 type AgentFormValues = {
   name: string
   voiceId: string
@@ -279,6 +288,14 @@ async function fetchAgents() {
   return data as AgentListResponse
 }
 
+async function fetchModelPricing() {
+  const { data, error } = await api.v1.billing["model-pricing"].get()
+  if (error) {
+    throw new Error(getApiErrorMessage(error, "Failed to load model pricing"))
+  }
+  return data as ModelPricingResponse
+}
+
 function toPayload(values: AgentFormValues) {
   const metadata = parseJsonRecordInput(values.metadata, "Metadata")
   const providerOptions = parseJsonRecordInput(
@@ -310,8 +327,7 @@ function toPayload(values: AgentFormValues) {
       : undefined,
     backgroundSound: values.backgroundSound.trim() || undefined,
     voicemailMessage: values.voicemailMessage.trim() || undefined,
-    successEvaluationPrompt:
-      values.successEvaluationPrompt.trim() || undefined,
+    successEvaluationPrompt: values.successEvaluationPrompt.trim() || undefined,
     webhookUrl: values.webhookUrl.trim() || undefined,
     webhookTimeoutSeconds: values.webhookTimeoutSeconds
       ? Number(values.webhookTimeoutSeconds)
@@ -353,6 +369,13 @@ function AgentForm({
   const modelOptions = withCurrentValue(
     LIVEKIT_MODEL_NAME_OPTIONS[selectedModelProvider] ?? [],
     selectedModelName
+  )
+  const pricingQuery = useQuery({
+    queryKey: dashboardQueryKeys.modelPricing(),
+    queryFn: fetchModelPricing,
+  })
+  const selectedModelPricing = pricingQuery.data?.models.find(
+    (item) => item.model === selectedModelName
   )
 
   useEffect(() => {
@@ -526,7 +549,7 @@ function AgentForm({
                 }}
               >
                 <SelectTrigger id="model-provider" className="w-full">
-                  <SelectValue placeholder="Select a LiveKit LLM provider" />
+                  <SelectValue placeholder="Select an AI Gateway provider" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preset provider</SelectItem>
@@ -556,7 +579,7 @@ function AgentForm({
                   <SelectValue
                     placeholder={
                       selectedModelProvider
-                        ? "Select a LiveKit model"
+                        ? "Select a Voice AI model"
                         : "Choose a model provider first"
                     }
                   />
@@ -573,9 +596,25 @@ function AgentForm({
             )}
           />
           <p className="text-xs text-muted-foreground">
-            Models are sourced from current LiveKit Inference LLM docs and
-            exclude retired entries.
+            AI usage is metered by model tokens; call runtime is{" "}
+            {pricingQuery.data?.runtimeCreditsPerStartedMinute ?? 1} credit per
+            started minute.
           </p>
+          {selectedModelName ? (
+            <p className="text-xs text-muted-foreground">
+              {selectedModelPricing ? (
+                <>
+                  Selected model estimate:{" "}
+                  {selectedModelPricing.inputCreditsPer1kTokens.toFixed(4)}{" "}
+                  input credits / 1K tokens and{" "}
+                  {selectedModelPricing.outputCreditsPer1kTokens.toFixed(4)}{" "}
+                  output credits / 1K tokens.
+                </>
+              ) : (
+                "Selected model has no code-owned pricing yet; usage will not be metered until pricing is added."
+              )}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -650,9 +689,7 @@ function AgentForm({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="webhook-secret">
-                  Webhook signing secret
-                </Label>
+                <Label htmlFor="webhook-secret">Webhook signing secret</Label>
                 <Input
                   id="webhook-secret"
                   type="password"

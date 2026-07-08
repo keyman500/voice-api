@@ -47,6 +47,7 @@ Next.js App Router
 1. **Elysia routes are the source of truth.** Every product capability is exposed as an Elysia route before any portal UI is built for it.
 2. **No Next.js API routes** — all backend logic lives in `lib/api.ts` and is mounted via the Elysia catch-all route.
 3. **Auth is enforced at the API layer.** Use the `auth: true` macro on Elysia routes. Never guard things only in UI.
+3. Good API documentation is a core feature not an after thought the API is the main part of this project
 
 ### Auth
 

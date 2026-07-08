@@ -9,6 +9,8 @@ export const dashboardQueryKeys = {
   agentsRoot: () => ["agents"] as const,
   livekit: () => ["twilio-config"] as const,
   apiKeys: () => ["api-keys"] as const,
+  billing: () => ["billing"] as const,
+  modelPricing: () => ["billing", "model-pricing"] as const,
   phoneNumbersRoot: () => ["phone-numbers"] as const,
   phoneNumbers: (limit = 100) => ["phone-numbers", limit] as const,
   agents: (limit = 100) => ["agents", limit] as const,
