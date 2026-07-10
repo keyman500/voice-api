@@ -32,6 +32,7 @@ type BillingPlan = {
   subscriptionStatus?: string
   currentPeriodStart?: string
   currentPeriodEnd?: string
+  cancelAtPeriodEnd?: boolean
 }
 
 type UsageLedgerRow = {
@@ -133,7 +134,7 @@ export function BillingWorkspace() {
             disabled={!status?.active || portalMutation.isPending}
             onClick={() => portalMutation.mutate()}
           >
-            Customer portal
+            Manage or cancel plan
             <RiExternalLinkLine />
           </Button>
         }
@@ -153,7 +154,9 @@ export function BillingWorkspace() {
               caption={
                 status.configured
                   ? status.active
-                    ? `Status: ${status.plan?.subscriptionStatus ?? "active"}`
+                    ? status.plan?.cancelAtPeriodEnd
+                      ? `Cancels ${formatDateTime(status.plan.currentPeriodEnd)}`
+                      : `Status: ${status.plan?.subscriptionStatus ?? "active"}`
                     : "Choose a plan before starting calls"
                   : "Polar env vars are not configured"
               }
@@ -201,7 +204,15 @@ export function BillingWorkspace() {
                             credits / month
                           </p>
                         </div>
-                        <StatusBadge status={current ? "active" : "outline"} />
+                        <StatusBadge
+                          status={
+                            current && status.plan?.cancelAtPeriodEnd
+                              ? "ending"
+                              : current
+                                ? "active"
+                                : "outline"
+                          }
+                        />
                       </div>
                       <p className="mt-4 text-3xl font-semibold">
                         {formatUsd(plan.priceUsd)}
@@ -213,12 +224,32 @@ export function BillingWorkspace() {
                       <Button
                         className="mt-5 w-full"
                         variant={current ? "outline" : "default"}
-                        disabled={current || checkoutMutation.isPending}
-                        onClick={() => checkoutMutation.mutate(planId)}
+                        disabled={
+                          (current && !status.plan?.cancelAtPeriodEnd) ||
+                          checkoutMutation.isPending ||
+                          portalMutation.isPending
+                        }
+                        onClick={() =>
+                          current
+                            ? portalMutation.mutate()
+                            : checkoutMutation.mutate(planId)
+                        }
                       >
-                        {current ? "Current plan" : `Choose ${plan.name}`}
-                        {!current ? <RiExternalLinkLine /> : null}
+                        {current
+                          ? status.plan?.cancelAtPeriodEnd
+                            ? "Manage cancellation"
+                            : "Current plan"
+                          : `Choose ${plan.name}`}
+                        {!current || status.plan?.cancelAtPeriodEnd ? (
+                          <RiExternalLinkLine />
+                        ) : null}
                       </Button>
+                      {current ? (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          Plan changes and cancellation are handled in the Polar
+                          customer portal.
+                        </p>
+                      ) : null}
                     </div>
                   )
                 })}

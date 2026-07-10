@@ -162,6 +162,15 @@ function createMockRelayService() {
           callSuccessful: true,
           successEvaluationStatus: "ready",
           successEvaluationReason: "The call was successful.",
+          billing: {
+            status: "ready",
+            runtimeCredits: 2,
+            agentCredits: 0.25,
+            postCallCredits: 0.05,
+            totalCredits: 2.3,
+            creditsRemaining: 997.7,
+            estimatedOverageCredits: 0,
+          },
           raw: { twilio: { sid: "CA123" } },
         }
         calls.set(call.id, call)
@@ -300,6 +309,15 @@ function createMockBillingService() {
       plan,
     })),
     portal: jest.fn(async () => ({ url: "https://polar.example/portal" })),
+    callUsage: jest.fn(async () => ({
+      status: "ready",
+      runtimeCredits: 2,
+      agentCredits: 0.25,
+      postCallCredits: 0.05,
+      totalCredits: 2.3,
+      creditsRemaining: 997.7,
+      estimatedOverageCredits: 0,
+    })),
     recordUsage: jest.fn(async (input: unknown) => input),
   }
 }
@@ -512,6 +530,32 @@ describe("/api/v1 relay routes", () => {
     )
   })
 
+  it("GET /api/v1/calls/:id returns the per-call credit breakdown", async () => {
+    await handle("/api/v1/twilio-config", {
+      method: "PUT",
+      body: JSON.stringify({
+        accountSid: "AC123456789",
+        authToken: "secret-token",
+      }),
+    })
+    await handle("/api/v1/calls", {
+      method: "POST",
+      body: JSON.stringify({ toNumber: "+15555550100" }),
+    })
+
+    const res = await handle("/api/v1/calls/call-1")
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      billing: {
+        runtimeCredits: 2,
+        agentCredits: 0.25,
+        totalCredits: 2.3,
+        creditsRemaining: 997.7,
+      },
+    })
+  })
+
   it("POST /api/v1/twilio/voice returns ConversationRelay TwiML", async () => {
     const res = await handle("/api/v1/twilio/voice", {
       method: "POST",
@@ -596,6 +640,40 @@ describe("/api/v1 relay routes", () => {
       userId: fakeUser.id,
       callId: "call-1",
     })
+  })
+
+  it("POST /api/v1/twilio/recording does not start workflow for absent recordings", async () => {
+    const service = createMockRelayService()
+    service.handleRecordingWebhook.mockResolvedValueOnce({
+      ok: true,
+      matched: true,
+      userId: fakeUser.id,
+      callId: "call-1",
+      recordingSid: "",
+      recordingStatus: "absent",
+    })
+    setVoiceRelayServiceForTests(service as never)
+    const starter = jest.fn(async (_input: unknown) => ({
+      runId: "run-recording-1",
+    }))
+    setPostCallWorkflowStarterForTests(starter)
+
+    const res = await handle("/api/v1/twilio/recording", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        CallSid: "CA123",
+        RecordingStatus: "absent",
+      }).toString(),
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      matched: true,
+      recordingStatus: "absent",
+    })
+    expect(starter).not.toHaveBeenCalled()
   })
 
   it("POST /api/v1/calls/:id/post-call/retry restarts post-call workflow", async () => {

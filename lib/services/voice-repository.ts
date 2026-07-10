@@ -132,12 +132,14 @@ function toCall(
     recordingStorageProvider: row.recordingStorageProvider ?? undefined,
     recordingContentType: row.recordingContentType ?? undefined,
     recordingSizeBytes: row.recordingSizeBytes ?? undefined,
-    postCallStatus: (row.postCallStatus as JsonCall["postCallStatus"]) ?? undefined,
+    postCallStatus:
+      (row.postCallStatus as JsonCall["postCallStatus"]) ?? undefined,
     postCallWorkflowRunId: row.postCallWorkflowRunId ?? undefined,
     recordingIngestedAt: iso(row.recordingIngestedAt),
     recordingDeletedFromTwilioAt: iso(row.recordingDeletedFromTwilioAt),
     recordingIngestionError: row.recordingIngestionError ?? undefined,
-    analysisStatus: (row.analysisStatus as JsonCall["analysisStatus"]) ?? undefined,
+    analysisStatus:
+      (row.analysisStatus as JsonCall["analysisStatus"]) ?? undefined,
     analysisError: row.analysisError ?? undefined,
     callSuccessful: row.callSuccessful,
     successEvaluationStatus:
@@ -162,7 +164,9 @@ function toCallWithUser(row: typeof schema.voiceCall.$inferSelect) {
   return { ...toCall(row), userId: row.userId }
 }
 
-function toPhone(row: typeof schema.voicePhoneNumber.$inferSelect): JsonPhoneNumber {
+function toPhone(
+  row: typeof schema.voicePhoneNumber.$inferSelect
+): JsonPhoneNumber {
   return {
     id: row.id,
     provider: VOICE_API_PROVIDER_ID,
@@ -187,7 +191,9 @@ function toPhoneWithUser(row: typeof schema.voicePhoneNumber.$inferSelect) {
   return { ...toPhone(row), userId: row.userId }
 }
 
-function toEvent(row: typeof schema.voiceCallEvent.$inferSelect): JsonCallEvent {
+function toEvent(
+  row: typeof schema.voiceCallEvent.$inferSelect
+): JsonCallEvent {
   return {
     id: row.id,
     type: row.type,
@@ -236,8 +242,8 @@ export function createVoiceRepository() {
       return {
         configured: Boolean(
           process.env.LIVEKIT_URL &&
-            process.env.LIVEKIT_API_KEY &&
-            process.env.LIVEKIT_API_SECRET
+          process.env.LIVEKIT_API_KEY &&
+          process.env.LIVEKIT_API_SECRET
         ),
         providerSource:
           process.env.LIVEKIT_URL &&
@@ -348,7 +354,9 @@ export function createVoiceRepository() {
         }
       }
       return {
-        configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+        configured: Boolean(
+          process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+        ),
         providerSource:
           process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
             ? "platform"
@@ -486,7 +494,12 @@ export function createVoiceRepository() {
       const [row] = await db
         .select()
         .from(schema.voiceAgent)
-        .where(and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, id)))
+        .where(
+          and(
+            eq(schema.voiceAgent.userId, userId),
+            eq(schema.voiceAgent.id, id)
+          )
+        )
         .limit(1)
       return row ? toAgent(row) : null
     },
@@ -506,7 +519,12 @@ export function createVoiceRepository() {
             updatedAt: now(),
           })
         )
-        .where(and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, id)))
+        .where(
+          and(
+            eq(schema.voiceAgent.userId, userId),
+            eq(schema.voiceAgent.id, id)
+          )
+        )
         .returning()
       return rows[0] ? toAgent(rows[0]) : null
     },
@@ -518,7 +536,10 @@ export function createVoiceRepository() {
         })
         .from(schema.voiceAgent)
         .where(
-          and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, agentId))
+          and(
+            eq(schema.voiceAgent.userId, userId),
+            eq(schema.voiceAgent.id, agentId)
+          )
         )
         .limit(1)
       return row?.encryptedWebhookSecret
@@ -529,7 +550,12 @@ export function createVoiceRepository() {
     async deleteAgent(userId: string, id: string): Promise<boolean> {
       const rows = await db
         .delete(schema.voiceAgent)
-        .where(and(eq(schema.voiceAgent.userId, userId), eq(schema.voiceAgent.id, id)))
+        .where(
+          and(
+            eq(schema.voiceAgent.userId, userId),
+            eq(schema.voiceAgent.id, id)
+          )
+        )
         .returning({ id: schema.voiceAgent.id })
       return rows.length > 0
     },
@@ -564,7 +590,8 @@ export function createVoiceRepository() {
         .from(schema.voiceCall)
         .where(eq(schema.voiceCall.userId, userId))
       if (q.agentId) rows = rows.filter((row) => row.agentId === q.agentId)
-      if (q.phoneNumberId) rows = rows.filter((row) => row.phoneNumberId === q.phoneNumberId)
+      if (q.phoneNumberId)
+        rows = rows.filter((row) => row.phoneNumberId === q.phoneNumberId)
       if (q.callStatus) rows = rows.filter((row) => row.status === q.callStatus)
       if (typeof q.callSuccessful === "boolean") {
         rows = rows.filter((row) => row.callSuccessful === q.callSuccessful)
@@ -582,13 +609,20 @@ export function createVoiceRepository() {
       const [row] = await db
         .select()
         .from(schema.voiceCall)
-        .where(and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id)))
+        .where(
+          and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id))
+        )
         .limit(1)
       if (!row) return null
       const events = await db
         .select()
         .from(schema.voiceCallEvent)
-        .where(and(eq(schema.voiceCallEvent.userId, userId), eq(schema.voiceCallEvent.callId, id)))
+        .where(
+          and(
+            eq(schema.voiceCallEvent.userId, userId),
+            eq(schema.voiceCallEvent.callId, id)
+          )
+        )
       return toCall(
         row,
         events
@@ -606,6 +640,15 @@ export function createVoiceRepository() {
       return row ? toCallWithUser(row) : null
     },
 
+    async findCallByTwilioCallSid(twilioCallSid: string) {
+      const [row] = await db
+        .select()
+        .from(schema.voiceCall)
+        .where(eq(schema.voiceCall.twilioCallSid, twilioCallSid))
+        .limit(1)
+      return row ? toCallWithUser(row) : null
+    },
+
     async updateCall(
       userId: string,
       id: string,
@@ -614,7 +657,9 @@ export function createVoiceRepository() {
       const rows = await db
         .update(schema.voiceCall)
         .set(cleanUpdate({ ...input, updatedAt: now() }))
-        .where(and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id)))
+        .where(
+          and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id))
+        )
         .returning()
       return rows[0] ? toCall(rows[0]) : null
     },
@@ -622,7 +667,9 @@ export function createVoiceRepository() {
     async deleteCall(userId: string, id: string): Promise<boolean> {
       const rows = await db
         .delete(schema.voiceCall)
-        .where(and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id)))
+        .where(
+          and(eq(schema.voiceCall.userId, userId), eq(schema.voiceCall.id, id))
+        )
         .returning({ id: schema.voiceCall.id })
       return rows.length > 0
     },
@@ -722,7 +769,10 @@ export function createVoiceRepository() {
         .select()
         .from(schema.voicePhoneNumber)
         .where(
-          and(eq(schema.voicePhoneNumber.userId, userId), eq(schema.voicePhoneNumber.id, id))
+          and(
+            eq(schema.voicePhoneNumber.userId, userId),
+            eq(schema.voicePhoneNumber.id, id)
+          )
         )
         .limit(1)
       return row ? toPhone(row) : null
@@ -746,7 +796,10 @@ export function createVoiceRepository() {
         .update(schema.voicePhoneNumber)
         .set(cleanUpdate({ ...input, updatedAt: now() }))
         .where(
-          and(eq(schema.voicePhoneNumber.userId, userId), eq(schema.voicePhoneNumber.id, id))
+          and(
+            eq(schema.voicePhoneNumber.userId, userId),
+            eq(schema.voicePhoneNumber.id, id)
+          )
         )
         .returning()
       return rows[0] ? toPhone(rows[0]) : null
@@ -756,7 +809,10 @@ export function createVoiceRepository() {
       const rows = await db
         .delete(schema.voicePhoneNumber)
         .where(
-          and(eq(schema.voicePhoneNumber.userId, userId), eq(schema.voicePhoneNumber.id, id))
+          and(
+            eq(schema.voicePhoneNumber.userId, userId),
+            eq(schema.voicePhoneNumber.id, id)
+          )
         )
         .returning({ id: schema.voicePhoneNumber.id })
       return rows.length > 0

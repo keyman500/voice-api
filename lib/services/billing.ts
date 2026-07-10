@@ -1,5 +1,5 @@
 import crypto from "node:crypto"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, gte, sum } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { getPolarSdk } from "@/lib/polar"
 import * as schema from "@/lib/schema"
@@ -39,6 +39,16 @@ export type UsageKind =
   | "post_call_analysis"
   | "success_evaluation"
 
+export type CallCreditUsage = {
+  status: "pending" | "ready" | "failed"
+  runtimeCredits: number
+  agentCredits: number
+  postCallCredits: number
+  totalCredits: number
+  creditsRemaining: number
+  estimatedOverageCredits: number
+}
+
 export type VoiceModelPricing = {
   model: string
   inputUsdPerToken: number
@@ -56,6 +66,12 @@ export const AI_USAGE_MARKUP = 1.5
 export const RUNTIME_CREDITS_PER_STARTED_MINUTE = 1
 
 export const VOICE_MODEL_PRICING: Record<string, VoiceModelPricing> = {
+  "deepseek/deepseek-v4-flash": {
+    model: "deepseek/deepseek-v4-flash",
+    inputUsdPerToken: 0.00000014,
+    outputUsdPerToken: 0.00000028,
+    source: "ai-gateway",
+  },
   "openai/gpt-4.1": {
     model: "openai/gpt-4.1",
     inputUsdPerToken: 0.000002,
@@ -172,6 +188,23 @@ export function creditsForRuntime(durationSeconds: number | undefined | null) {
   return Math.ceil(seconds / 60) * RUNTIME_CREDITS_PER_STARTED_MINUTE
 }
 
+export function reconcileCreditBalance(input: {
+  credited: number
+  polarConsumed: number
+  localConsumed: number
+}) {
+  // Polar event ingestion is eventually consistent. The local ledger is written
+  // first, so use whichever consumed total is newer to avoid showing spent
+  // credits as available immediately after a call.
+  const used = Math.max(input.polarConsumed, input.localConsumed)
+  return {
+    used,
+    credited: input.credited,
+    balance: Math.max(0, input.credited - used),
+    estimatedOverageCredits: Math.max(0, used - input.credited),
+  }
+}
+
 export function modelPricingForApi() {
   return Object.values(VOICE_MODEL_PRICING).map((item) => ({
     ...item,
@@ -227,8 +260,80 @@ async function recentUsage(userId: string, limit = 20) {
     .limit(limit)
 }
 
+async function creditsUsedSince(userId: string, since?: Date) {
+  const filters = [eq(schema.usageLedger.userId, userId)]
+  if (since) filters.push(gte(schema.usageLedger.createdAt, since))
+  const [result] = await db
+    .select({ credits: sum(schema.usageLedger.credits) })
+    .from(schema.usageLedger)
+    .where(and(...filters))
+  return Number(result?.credits ?? 0)
+}
+
+function validDate(value: Date | string | undefined) {
+  if (!value) return undefined
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(date.getTime()) ? date : undefined
+}
+
 export function createBillingService() {
   const polar = getPolarSdk()
+
+  async function billingStatus(userId: string) {
+    const usage = await recentUsage(userId)
+    if (!polar) {
+      const localCreditsUsed = await creditsUsedSince(userId)
+      return {
+        configured: false,
+        active: false,
+        plan: null,
+        plans: VOICE_CREDIT_PLANS,
+        credits: {
+          used: localCreditsUsed,
+          credited: 0,
+          balance: 0,
+          estimatedOverageCredits: 0,
+        },
+        recentUsage: usage,
+      }
+    }
+    const state = await polar.customers.getStateExternal({
+      externalId: userId,
+    })
+    const subscription = activeSubscriptionFromState(state)
+    const planId = planForProduct(subscription?.productId) ?? null
+    const meter =
+      state.activeMeters?.find((item) => item.creditedUnits > 0) ??
+      state.activeMeters?.[0]
+    const credited =
+      meter?.creditedUnits ??
+      (planId ? VOICE_CREDIT_PLANS[planId].includedCredits : 0)
+    const localCreditsUsed = await creditsUsedSince(
+      userId,
+      validDate(subscription?.currentPeriodStart)
+    )
+    const credits = reconcileCreditBalance({
+      credited,
+      polarConsumed: meter?.consumedUnits ?? 0,
+      localConsumed: localCreditsUsed,
+    })
+    return {
+      configured: true,
+      active: Boolean(subscription),
+      plan: planId
+        ? {
+            ...VOICE_CREDIT_PLANS[planId],
+            subscriptionStatus: subscription?.status,
+            currentPeriodStart: subscription?.currentPeriodStart,
+            currentPeriodEnd: subscription?.currentPeriodEnd,
+            cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
+          }
+        : null,
+      plans: VOICE_CREDIT_PLANS,
+      credits,
+      recentUsage: usage,
+    }
+  }
 
   return {
     plans: VOICE_CREDIT_PLANS,
@@ -243,60 +348,55 @@ export function createBillingService() {
       }
     },
 
-    async status(userId: string) {
-      const usage = await recentUsage(userId)
-      const localCreditsUsed = usage.reduce(
-        (sum, item) => sum + item.credits,
-        0
-      )
-      if (!polar) {
-        return {
-          configured: false,
-          active: false,
-          plan: null,
-          plans: VOICE_CREDIT_PLANS,
-          credits: {
-            used: localCreditsUsed,
-            credited: 0,
-            balance: 0,
-            estimatedOverageCredits: 0,
-          },
-          recentUsage: usage,
-        }
+    status: billingStatus,
+
+    async callUsage(userId: string, callId: string): Promise<CallCreditUsage> {
+      const rows = await db
+        .select()
+        .from(schema.usageLedger)
+        .where(
+          and(
+            eq(schema.usageLedger.userId, userId),
+            eq(schema.usageLedger.callId, callId)
+          )
+        )
+      const runtimeCredits = rows
+        .filter((row) => row.kind === "call_runtime")
+        .reduce((total, row) => total + row.credits, 0)
+      const agentCredits = rows
+        .filter((row) => row.kind === "ai_tokens")
+        .reduce((total, row) => total + row.credits, 0)
+      const postCallCredits = rows
+        .filter(
+          (row) =>
+            row.kind === "post_call_analysis" ||
+            row.kind === "success_evaluation"
+        )
+        .reduce((total, row) => total + row.credits, 0)
+      let creditsRemaining = 0
+      let estimatedOverageCredits = 0
+      let balanceFailed = false
+      try {
+        const account = await billingStatus(userId)
+        creditsRemaining = account.credits.balance
+        estimatedOverageCredits = account.credits.estimatedOverageCredits
+      } catch {
+        balanceFailed = true
       }
-      const state = await polar.customers.getStateExternal({
-        externalId: userId,
-      })
-      const subscription = activeSubscriptionFromState(state)
-      const planId = planForProduct(subscription?.productId) ?? null
-      const meter =
-        state.activeMeters?.find((item) => item.creditedUnits > 0) ??
-        state.activeMeters?.[0]
-      const credited =
-        meter?.creditedUnits ??
-        (planId ? VOICE_CREDIT_PLANS[planId].includedCredits : 0)
-      const consumed = meter?.consumedUnits ?? localCreditsUsed
-      const balance = meter?.balance ?? Math.max(0, credited - consumed)
       return {
-        configured: true,
-        active: Boolean(subscription),
-        plan: planId
-          ? {
-              ...VOICE_CREDIT_PLANS[planId],
-              subscriptionStatus: subscription?.status,
-              currentPeriodStart: subscription?.currentPeriodStart,
-              currentPeriodEnd: subscription?.currentPeriodEnd,
-              cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
-            }
-          : null,
-        plans: VOICE_CREDIT_PLANS,
-        credits: {
-          used: consumed,
-          credited,
-          balance,
-          estimatedOverageCredits: Math.max(0, consumed - credited),
-        },
-        recentUsage: usage,
+        status:
+          balanceFailed ||
+          rows.some((row) => row.polarIngestStatus === "failed")
+            ? "failed"
+            : rows.some((row) => row.polarIngestStatus === "pending")
+              ? "pending"
+              : "ready",
+        runtimeCredits,
+        agentCredits,
+        postCallCredits,
+        totalCredits: runtimeCredits + agentCredits + postCallCredits,
+        creditsRemaining,
+        estimatedOverageCredits,
       }
     },
 

@@ -28,6 +28,12 @@ import {
 import { CallTranscriptThread } from "@/components/dashboard/call-transcript-thread"
 import type { JsonCall } from "@/lib/services/voice-types"
 
+function formatCredits(value?: number | null) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 4,
+  }).format(value ?? 0)
+}
+
 async function fetchCall(id: string) {
   const { data, error } = await api.v1.calls({ id }).get()
   if (error) {
@@ -140,6 +146,48 @@ export function CallLogDetail({ id }: { id: string }) {
                 </p>
               </div>
 
+              {call.billing ? (
+                <div className="space-y-4 rounded-[1.5rem] border border-border/70 bg-background/75 px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Credit usage
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Current account balance after recorded usage
+                      </p>
+                    </div>
+                    <StatusBadge status={call.billing.status} />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <KeyValue
+                      label="Call runtime"
+                      value={`${formatCredits(call.billing.runtimeCredits)} credits`}
+                    />
+                    <KeyValue
+                      label="Agent AI"
+                      value={`${formatCredits(call.billing.agentCredits)} credits`}
+                    />
+                    <KeyValue
+                      label="Post-call AI"
+                      value={`${formatCredits(call.billing.postCallCredits)} credits`}
+                    />
+                    <KeyValue
+                      label="Total for call"
+                      value={`${formatCredits(call.billing.totalCredits)} credits`}
+                    />
+                    <KeyValue
+                      label="Credits remaining"
+                      value={formatCredits(call.billing.creditsRemaining)}
+                    />
+                    <KeyValue
+                      label="Estimated overage"
+                      value={`${formatCredits(call.billing.estimatedOverageCredits)} credits`}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-3 rounded-[1.5rem] border border-border/70 bg-background/75 px-5 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -220,8 +268,8 @@ export function CallLogDetail({ id }: { id: string }) {
                     <p className="mt-1 text-muted-foreground">
                       {call.webhookDeliveryStatus === "skipped"
                         ? "No webhook URL configured"
-                        : call.webhookDeliveryError ??
-                        `${call.webhookDeliveryAttempts ?? 0} delivery attempt(s)`}
+                        : (call.webhookDeliveryError ??
+                          `${call.webhookDeliveryAttempts ?? 0} delivery attempt(s)`)}
                     </p>
                   </div>
                   <StatusBadge

@@ -38,6 +38,8 @@ export type TwilioIncomingPhoneNumber = {
   friendlyName?: string
   voiceUrl?: string
   voiceMethod?: string
+  statusCallbackUrl?: string
+  statusCallbackMethod?: string
   raw: unknown
 }
 
@@ -52,6 +54,9 @@ export type ConversationRelayOptions = {
   interruptible?: "none" | "dtmf" | "speech" | "any"
   interruptSensitivity?: "high" | "medium" | "low"
   reportInputDuringAgentSpeech?: "none" | "dtmf" | "speech" | "any"
+  recordingStatusCallbackUrl?: string
+  recordingStatusCallbackMethod?: "GET" | "POST"
+  recordingStatusCallbackEvent?: string
   customParameters?: Record<string, string | undefined>
 }
 
@@ -79,7 +84,13 @@ export type TwilioAdapter = {
   ): Promise<TwilioIncomingPhoneNumber[]>
   updateIncomingPhoneNumberWebhook(
     credentials: TwilioCredentials,
-    input: { sid: string; voiceUrl: string; voiceMethod?: "GET" | "POST" }
+    input: {
+      sid: string
+      voiceUrl: string
+      voiceMethod?: "GET" | "POST"
+      statusCallbackUrl?: string
+      statusCallbackMethod?: "GET" | "POST"
+    }
   ): Promise<TwilioIncomingPhoneNumber>
   validateSignature(input: {
     authToken: string
@@ -109,7 +120,11 @@ function formBody(input: Record<string, string | undefined>) {
   return body
 }
 
-function signatureFor(authToken: string, url: string, params: Record<string, string>) {
+function signatureFor(
+  authToken: string,
+  url: string,
+  params: Record<string, string>
+) {
   const sorted = Object.keys(params).sort()
   const payload = sorted.reduce((acc, key) => acc + key + params[key], url)
   return crypto.createHmac("sha1", authToken).update(payload).digest("base64")
@@ -219,17 +234,41 @@ export const twilioAdapter: TwilioAdapter = {
       input.reportInputDuringAgentSpeech
     )
     const params = Object.entries(input.customParameters ?? {})
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
       .map(
         ([name, value]) =>
           `<Parameter name="${escapeXml(name)}" value="${escapeXml(value)}" />`
       )
       .join("")
-    return `<?xml version="1.0" encoding="UTF-8"?><Response><Connect><ConversationRelay ${attrs.join(" ")}>${params}</ConversationRelay></Connect></Response>`
+    const recordingAttrs: string[] = []
+    appendAttr(
+      recordingAttrs,
+      "recordingStatusCallback",
+      input.recordingStatusCallbackUrl
+    )
+    appendAttr(
+      recordingAttrs,
+      "recordingStatusCallbackMethod",
+      input.recordingStatusCallbackMethod
+    )
+    appendAttr(
+      recordingAttrs,
+      "recordingStatusCallbackEvent",
+      input.recordingStatusCallbackEvent
+    )
+    const recording = input.recordingStatusCallbackUrl
+      ? `<Start><Recording ${recordingAttrs.join(" ")} /></Start>`
+      : ""
+    return `<?xml version="1.0" encoding="UTF-8"?><Response>${recording}<Connect><ConversationRelay ${attrs.join(" ")}>${params}</ConversationRelay></Connect></Response>`
   },
 
   async getRecording(credentials, recordingSid) {
-    const raw = await twilioJson(credentials, `/Recordings/${recordingSid}.json`)
+    const raw = await twilioJson(
+      credentials,
+      `/Recordings/${recordingSid}.json`
+    )
     const record = raw as Record<string, unknown>
     return {
       sid: typeof record.sid === "string" ? record.sid : recordingSid,
@@ -274,7 +313,9 @@ export const twilioAdapter: TwilioAdapter = {
       }
     )
     if (!res.ok && res.status !== 404) {
-      throw new Error(`Twilio recording delete failed with status ${res.status}`)
+      throw new Error(
+        `Twilio recording delete failed with status ${res.status}`
+      )
     }
   },
 
@@ -295,20 +336,24 @@ export const twilioAdapter: TwilioAdapter = {
               ? record.account_sid
               : undefined,
           phoneNumber:
-            typeof record.phone_number === "string"
-              ? record.phone_number
-              : "",
+            typeof record.phone_number === "string" ? record.phone_number : "",
           friendlyName:
             typeof record.friendly_name === "string"
               ? record.friendly_name
               : undefined,
           voiceUrl:
-            typeof record.voice_url === "string"
-              ? record.voice_url
-              : undefined,
+            typeof record.voice_url === "string" ? record.voice_url : undefined,
           voiceMethod:
             typeof record.voice_method === "string"
               ? record.voice_method
+              : undefined,
+          statusCallbackUrl:
+            typeof record.status_callback === "string"
+              ? record.status_callback
+              : undefined,
+          statusCallbackMethod:
+            typeof record.status_callback_method === "string"
+              ? record.status_callback_method
               : undefined,
           raw: item,
         }
@@ -328,6 +373,8 @@ export const twilioAdapter: TwilioAdapter = {
         body: formBody({
           VoiceUrl: input.voiceUrl,
           VoiceMethod: input.voiceMethod ?? "POST",
+          StatusCallback: input.statusCallbackUrl,
+          StatusCallbackMethod: input.statusCallbackMethod,
         }),
       }
     )
@@ -348,6 +395,14 @@ export const twilioAdapter: TwilioAdapter = {
         typeof record.voice_method === "string"
           ? record.voice_method
           : undefined,
+      statusCallbackUrl:
+        typeof record.status_callback === "string"
+          ? record.status_callback
+          : input.statusCallbackUrl,
+      statusCallbackMethod:
+        typeof record.status_callback_method === "string"
+          ? record.status_callback_method
+          : input.statusCallbackMethod,
       raw,
     }
   },

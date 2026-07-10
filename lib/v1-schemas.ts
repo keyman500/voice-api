@@ -23,11 +23,7 @@ const optionalRecordUnknown = t.Optional(recordUnknown)
 const nullableString = t.Union([t.String(), t.Null(), t.Undefined()])
 const nullableNumber = t.Union([t.Number(), t.Null(), t.Undefined()])
 const nullableBoolean = t.Union([t.Boolean(), t.Null(), t.Undefined()])
-const nullableRecordUnknown = t.Union([
-  recordUnknown,
-  t.Null(),
-  t.Undefined(),
-])
+const nullableRecordUnknown = t.Union([recordUnknown, t.Null(), t.Undefined()])
 
 export const errorResponse = t.Object({
   error: t.Object({
@@ -260,6 +256,21 @@ export const callResponse = t.Object({
   webhookDeliveryError: t.Optional(nullableString),
   webhookLastAttemptAt: t.Optional(nullableString),
   webhookDeliveredAt: t.Optional(nullableString),
+  billing: t.Optional(
+    t.Object({
+      status: t.Union([
+        t.Literal("pending"),
+        t.Literal("ready"),
+        t.Literal("failed"),
+      ]),
+      runtimeCredits: t.Number(),
+      agentCredits: t.Number(),
+      postCallCredits: t.Number(),
+      totalCredits: t.Number(),
+      creditsRemaining: t.Number(),
+      estimatedOverageCredits: t.Number(),
+    })
+  ),
   events: t.Optional(
     t.Array(
       t.Object({

@@ -31,13 +31,7 @@ export type JsonCall = {
   phoneNumberId?: string
   toNumber?: string
   fromNumber?: string
-  status:
-    | "queued"
-    | "ringing"
-    | "in-progress"
-    | "ended"
-    | "error"
-    | "unknown"
+  status: "queued" | "ringing" | "in-progress" | "ended" | "error" | "unknown"
   startedAt?: string
   endedAt?: string
   duration?: number
@@ -82,6 +76,15 @@ export type JsonCall = {
   webhookDeliveryError?: string
   webhookLastAttemptAt?: string
   webhookDeliveredAt?: string
+  billing?: {
+    status: "pending" | "ready" | "failed"
+    runtimeCredits: number
+    agentCredits: number
+    postCallCredits: number
+    totalCredits: number
+    creditsRemaining: number
+    estimatedOverageCredits: number
+  }
   providerSource?: "user" | "platform"
   createdAt?: string
   updatedAt?: string

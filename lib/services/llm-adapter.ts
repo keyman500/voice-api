@@ -40,13 +40,15 @@ export type LlmAdapter = {
   }): Promise<LlmSuccessEvaluationResponse>
 }
 
+const DEFAULT_AI_GATEWAY_MODEL = "deepseek/deepseek-v4-flash"
+
 function gatewayModelFor(agent: JsonAgent) {
   if (agent.model?.model) {
     if (agent.model.model.includes("/")) return agent.model.model
     if (agent.model.provider)
       return `${agent.model.provider}/${agent.model.model}`
   }
-  return process.env.AI_GATEWAY_MODEL ?? "openai/gpt-5.5"
+  return process.env.AI_GATEWAY_MODEL ?? DEFAULT_AI_GATEWAY_MODEL
 }
 
 function normalizeUsage(usage: unknown): TokenUsage {
@@ -102,7 +104,7 @@ export const llmAdapter: LlmAdapter = {
     const model =
       process.env.AI_GATEWAY_ANALYSIS_MODEL ??
       process.env.AI_GATEWAY_MODEL ??
-      "openai/gpt-5.5"
+      DEFAULT_AI_GATEWAY_MODEL
     const result = await generateText({
       model,
       system:
@@ -152,7 +154,7 @@ export const llmAdapter: LlmAdapter = {
     const model =
       process.env.AI_GATEWAY_ANALYSIS_MODEL ??
       process.env.AI_GATEWAY_MODEL ??
-      "openai/gpt-5.5"
+      DEFAULT_AI_GATEWAY_MODEL
     const result = await generateText({
       model,
       system:
