@@ -1,4 +1,4 @@
-import { polar, portal, usage } from "@polar-sh/better-auth"
+import { checkout, polar, portal, usage, webhooks } from "@polar-sh/better-auth"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { apiKey } from "@better-auth/api-key"
@@ -11,7 +11,36 @@ const polarAuthPlugin = polarSdk
   ? polar({
       client: polarSdk,
       createCustomerOnSignUp: true,
-      use: [portal(), usage()],
+      use: [
+        checkout({
+          products: [
+            ...(process.env.POLAR_STARTER_PRODUCT_ID
+              ? [
+                  {
+                    productId: process.env.POLAR_STARTER_PRODUCT_ID,
+                    slug: "starter",
+                  },
+                ]
+              : []),
+            ...(process.env.POLAR_PRO_PRODUCT_ID
+              ? [
+                  {
+                    productId: process.env.POLAR_PRO_PRODUCT_ID,
+                    slug: "pro",
+                  },
+                ]
+              : []),
+          ],
+          authenticatedUsersOnly: true,
+          successUrl: process.env.POLAR_CHECKOUT_SUCCESS_URL,
+          returnUrl: process.env.POLAR_CHECKOUT_RETURN_URL,
+        }),
+        portal({ returnUrl: process.env.POLAR_CHECKOUT_RETURN_URL }),
+        usage(),
+        ...(process.env.POLAR_WEBHOOK_SECRET
+          ? [webhooks({ secret: process.env.POLAR_WEBHOOK_SECRET })]
+          : []),
+      ],
     })
   : null
 
@@ -37,7 +66,7 @@ export const auth = betterAuth({
   },
 
   // API key plugin — foundation only (no key-management UX yet).
-  // Polar: customer on sign-up, portal + usage (checkout/webhooks added later).
+  // Polar: customer on sign-up, checkout, portal, usage, and optional webhooks.
   plugins: [apiKey(), ...(polarAuthPlugin ? [polarAuthPlugin] : [])],
 })
 

@@ -4,7 +4,7 @@ import { Elysia } from "elysia"
 import { cors } from "@elysiajs/cors"
 import { openapi, fromTypes } from "@elysiajs/openapi"
 import { auth } from "@/lib/auth"
-import { voiceV1 } from "./voice-v1"
+import { voiceRelay } from "./voice-relay"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -52,12 +52,16 @@ export const app = new Elysia({ prefix: "/api" })
           title: "Voice API",
           version: "0.0.1",
           description:
-            "Phase 1: agents, calls, and phone numbers — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie or `Authorization: Bearer <api_key>`.",
+            "ConversationRelay-backed agents, calls, call logs, recordings, phone numbers, and Twilio configuration — aligned with `voice-ai-sdk` field names. Authenticate with a Better Auth session cookie, `Authorization: Bearer <api_key>`, or the default Better Auth `x-api-key: <api_key>` header. API keys can be created from Dashboard Settings.",
         },
         tags: [
+          { name: "Authentication", description: "Use a session cookie, Bearer API key, or x-api-key header for protected v1 routes" },
+          { name: "Twilio config", description: "Encrypted BYOK Twilio connection settings" },
           { name: "Agents", description: "Voice agent configuration" },
-          { name: "Calls", description: "Call resources (stub; LiveKit integration later)" },
+          { name: "Calls", description: "Call resources backed by Twilio ConversationRelay and local logs" },
+          { name: "Logs", description: "Call history, transcript, recording, and post-call analysis resources exposed through the calls endpoints" },
           { name: "Phone numbers", description: "Phone number bindings" },
+          { name: "Twilio webhooks", description: "Twilio Voice, status, and recording callbacks" },
         ],
       },
       /** Enrich spec with TypeScript-inferred routes where runtime schema is thin. */
@@ -68,7 +72,7 @@ export const app = new Elysia({ prefix: "/api" })
     })
   )
   .use(betterAuth)
-  .use(voiceV1)
+  .use(voiceRelay)
 
   // ── Public endpoints ────────────────────────────────────────────────────
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
@@ -81,7 +85,7 @@ export const app = new Elysia({ prefix: "/api" })
   // ── Protected endpoints ─────────────────────────────────────────────────
   .get("/session", ({ user, session }) => ({ user, session }), { auth: true })
 
-  // Voice product surface lives under /api/v1/* (see `lib/voice-v1.ts`).
+  // Voice product surface lives under /api/v1/* (see `lib/voice-relay.ts`).
 
 // ---------------------------------------------------------------------------
 // Next.js App Router HTTP method handlers

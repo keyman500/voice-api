@@ -44,12 +44,23 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  nativeButton,
+  render,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // Base UI defaults nativeButton to true; a slotted <a> (e.g. Next <Link />) is not
+  // a native <button> — opt out unless callers explicitly set nativeButton.
+  const resolvedNativeButton =
+    render != null
+      ? (nativeButton ?? false)
+      : (nativeButton ?? true)
+
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      nativeButton={resolvedNativeButton}
+      render={render}
       {...props}
     />
   )

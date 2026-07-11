@@ -25,8 +25,8 @@ type VerifyApiKeyResult = {
 }
 
 /**
- * Resolves a signed-in user from either a Better Auth **session** (cookie)
- * or a **Bearer** API key (`Authorization: Bearer <key>`) verified via `verifyApiKey`.
+ * Resolves a signed-in user from either a Better Auth **session** (cookie),
+ * a Bearer API key, or Better Auth's default `x-api-key` header.
  */
 export async function resolveAuthedContext(
   headers: Headers
@@ -42,10 +42,10 @@ export async function resolveAuthedContext(
   }
 
   const authz = headers.get("authorization")
-  if (!authz?.toLowerCase().startsWith("bearer ")) {
-    return null
-  }
-  const rawKey = authz.slice(7).trim()
+  const bearerKey = authz?.toLowerCase().startsWith("bearer ")
+    ? authz.slice(7).trim()
+    : ""
+  const rawKey = bearerKey || headers.get("x-api-key")?.trim()
   if (!rawKey) {
     return null
   }

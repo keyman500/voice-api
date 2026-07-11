@@ -47,6 +47,7 @@ Next.js App Router
 1. **Elysia routes are the source of truth.** Every product capability is exposed as an Elysia route before any portal UI is built for it.
 2. **No Next.js API routes** — all backend logic lives in `lib/api.ts` and is mounted via the Elysia catch-all route.
 3. **Auth is enforced at the API layer.** Use the `auth: true` macro on Elysia routes. Never guard things only in UI.
+3. Good API documentation is a core feature not an after thought the API is the main part of this project
 
 ### Auth
 
@@ -69,6 +70,13 @@ Next.js App Router
 11. When adding or changing endpoint response shapes, check compatibility with `keyman500/voice-ai-sdk`.
 12. Prefer predictable, versioned response shapes so SDK consumers are not broken by additions.
 
+### Testing
+
+13. This project is test-driven. Add or update tests before/with behavior changes.
+14. API route tests should exercise `app.handle` with mocked auth and assert status codes plus response shapes.
+15. Service tests must mock database/repository calls and external SDK clients, then assert the expected DB writes/updates and LiveKit SDK method parameters.
+16. For LiveKit-backed behavior, cover success, missing config, provider fallback, SDK failure, and stored call logs/events.
+
 ---
 
 ## Environment Variables
@@ -78,5 +86,7 @@ Next.js App Router
 | `DATABASE_URL`       | ✅       | Neon PostgreSQL connection string                  |
 | `BETTER_AUTH_SECRET` | ✅       | At least 32-character random secret                |
 | `BETTER_AUTH_URL`    | ✅       | Base URL of the app (e.g. `http://localhost:3000`) |
+| `NEXT_PUBLIC_POSTHOG_KEY` | —   | PostHog project API key (client analytics; optional) |
+| `NEXT_PUBLIC_POSTHOG_HOST` | —  | PostHog API host (default `https://us.i.posthog.com`) |
 
 Copy `.env.example` → `.env.local` and fill in values before running.

@@ -1,0 +1,66 @@
+"use client"
+
+import * as React from "react"
+import { cn } from "@/lib/utils"
+
+interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
+  size?: "sm" | "md" | "lg"
+}
+
+const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
+  ({ className, size = "md", ...props }, ref) => {
+    const sizeClasses = {
+      sm: "h-8 w-8 text-xs",
+      md: "h-10 w-10 text-sm",
+      lg: "h-12 w-12 text-base",
+    }
+
+    return (
+      <div
+        ref={ref}
+        data-slot="avatar"
+        className={cn(
+          "relative flex shrink-0 overflow-hidden rounded-full",
+          sizeClasses[size],
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
+Avatar.displayName = "Avatar"
+
+type AvatarImageProps = React.ImgHTMLAttributes<HTMLImageElement>
+
+const AvatarImage = React.forwardRef<HTMLImageElement, AvatarImageProps>(
+  ({ alt = "", className, ...props }, ref) => (
+    <img
+      ref={ref}
+      alt={alt}
+      data-slot="avatar-image"
+      className={cn("aspect-square h-full w-full object-cover", className)}
+      {...props}
+    />
+  )
+)
+AvatarImage.displayName = "AvatarImage"
+
+type AvatarFallbackProps = React.HTMLAttributes<HTMLDivElement>
+
+const AvatarFallback = React.forwardRef<HTMLDivElement, AvatarFallbackProps>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      data-slot="avatar-fallback"
+      className={cn(
+        "flex h-full w-full items-center justify-center rounded-full bg-muted font-medium text-muted-foreground",
+        className
+      )}
+      {...props}
+    />
+  )
+)
+AvatarFallback.displayName = "AvatarFallback"
+
+export { Avatar, AvatarImage, AvatarFallback }

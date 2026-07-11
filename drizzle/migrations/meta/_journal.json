@@ -8,6 +8,55 @@
       "when": 1777110238610,
       "tag": "0000_remarkable_wilson_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777116905550,
+      "tag": "0001_wet_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782993993202,
+      "tag": "0002_hard_the_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783399764864,
+      "tag": "0003_empty_fat_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783402882971,
+      "tag": "0004_big_bedlam",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783407850661,
+      "tag": "0005_modern_phantom_reporter",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783550580613,
+      "tag": "0006_windy_warpath",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783734682089,
+      "tag": "0007_cheerful_echo",
+      "breakpoints": true
     }
   ]
 }

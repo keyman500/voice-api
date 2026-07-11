@@ -52,7 +52,7 @@ function SignalWaveform({ className }: { className?: string }) {
   const bars = [12, 28, 42, 56, 48, 32, 18, 36, 52, 38, 22, 44, 30, 14, 40]
   return (
     <svg
-      className={cn("h-32 w-full max-w-xs text-teal-400/90", className)}
+      className={cn("h-32 w-full max-w-xs text-primary/80", className)}
       viewBox="0 0 240 80"
       fill="currentColor"
       aria-hidden
@@ -158,20 +158,20 @@ export function LoginExperience({
   return (
     <div
       className={cn(
-        "dark relative min-h-svh overflow-hidden bg-[#080a0d] text-zinc-100",
+        "relative min-h-svh overflow-hidden bg-background text-foreground dark:bg-[#080a0d] dark:text-zinc-100",
         fontVariableClassName
       )}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,oklch(0.22_0.08_200/0.35)_0%,transparent_45%,oklch(0.15_0.02_260/0.4)_100%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgb(14_165_233/0.14)_0%,transparent_42%,rgb(20_184_166/0.1)_100%)] dark:bg-[linear-gradient(135deg,rgb(25_50_80/0.35)_0%,transparent_45%,rgb(30_32_60/0.4)_100%)]"
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35] bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-size-[48px_48px]"
+        className="pointer-events-none absolute inset-0 bg-size-[48px_48px] opacity-[0.45] bg-[linear-gradient(rgba(0,0,0,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.06)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] dark:opacity-[0.35]"
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg_viewBox=%220_0_256_256%22_xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter_id=%22n%22%3E%3CfeTurbulence_type=%22fractalNoise%22_baseFrequency=%220.85%22_numOctaves=%224%22_stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect_width=%22100%25%22_height=%22100%25%22_filter=%22url(%23n)%22/%3E%3C/svg%3E')] opacity-[0.08]"
+        className="pointer-events-none absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg_viewBox=%220_0_256_256%22_xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter_id=%22n%22%3E%3CfeTurbulence_type=%22fractalNoise%22_baseFrequency=%220.85%22_numOctaves=%224%22_stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect_width=%22100%25%22_height=%22100%25%22_filter=%22url(%23n)%22/%3E%3C/svg%3E')] opacity-[0.06] dark:opacity-[0.08]"
         aria-hidden
       />
 
@@ -179,7 +179,7 @@ export function LoginExperience({
         type="button"
         variant="ghost"
         size="icon-sm"
-        className="absolute top-4 right-4 z-10 border border-white/10 bg-zinc-900/60 text-zinc-300 backdrop-blur-md hover:bg-zinc-800/80 hover:text-white"
+        className="absolute top-4 right-4 z-10 border border-border bg-card/85 text-muted-foreground backdrop-blur-md hover:bg-muted hover:text-foreground dark:border-white/10 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-800/80 dark:hover:text-white"
         onClick={() =>
           setTheme(resolvedTheme === "dark" ? "light" : "dark")
         }
@@ -196,7 +196,7 @@ export function LoginExperience({
         >
           <p
             className={cn(
-              "mb-3 text-xs font-medium tracking-[0.28em] text-teal-400/90 uppercase",
+              "mb-3 text-xs font-medium tracking-[0.28em] text-primary/80 uppercase",
               monoFontClassName
             )}
           >
@@ -210,7 +210,7 @@ export function LoginExperience({
           >
             Build on an open voice stack.
           </h1>
-          <p className="mb-10 max-w-md text-base leading-relaxed text-zinc-400">
+          <p className="mb-10 max-w-md text-base leading-relaxed text-muted-foreground dark:text-zinc-400">
             Self-hostable API for agents, calls, and phone numbers — typed
             routes, webhooks, and session or API key access.
           </p>
@@ -218,7 +218,7 @@ export function LoginExperience({
             <SignalWaveform />
             <p
               className={cn(
-                "mt-6 text-xs tracking-wide text-zinc-500 uppercase",
+                "mt-6 text-xs tracking-wide text-muted-foreground uppercase dark:text-zinc-500",
                 monoFontClassName
               )}
             >
@@ -231,12 +231,12 @@ export function LoginExperience({
           className="w-full max-w-md flex-1 self-center motion-safe:animate-[login-fade-up_0.7s_ease-out_both]"
           style={{ animationDelay: "120ms" }}
         >
-          <Card className="border border-white/10 bg-zinc-900/75 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_24px_80px_-20px_rgba(0,0,0,0.65)] backdrop-blur-xl">
+          <Card className="border border-border/80 bg-card/90 shadow-lg shadow-foreground/5 backdrop-blur-xl dark:border-white/10 dark:bg-zinc-900/75 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_24px_80px_-20px_rgba(0,0,0,0.65)]">
             <CardHeader>
-              <CardTitle className="text-lg text-zinc-100">
+              <CardTitle className="text-lg dark:text-zinc-100">
                 {mode === "sign-in" ? "Sign in" : "Create account"}
               </CardTitle>
-              <CardDescription className="text-zinc-500">
+              <CardDescription className="dark:text-zinc-500">
                 {mode === "sign-in"
                   ? "Use your email and password to open the portal."
                   : "Register to get started with the API and dashboard."}
@@ -252,7 +252,7 @@ export function LoginExperience({
                   <div className="grid gap-2">
                     <Label
                       htmlFor="name"
-                      className="text-zinc-300"
+                      className="dark:text-zinc-300"
                     >
                       Name
                     </Label>
@@ -267,11 +267,11 @@ export function LoginExperience({
                             autoComplete="name"
                             placeholder="Ada Lovelace"
                             aria-invalid={fieldState.invalid}
-                            className="border-white/10 bg-zinc-950/80 text-zinc-100 placeholder:text-zinc-600"
+                            className="dark:border-white/10 dark:bg-zinc-950/80 dark:text-zinc-100 dark:placeholder:text-zinc-600"
                             {...field}
                           />
                           {fieldState.error?.message && (
-                            <p className="text-xs text-red-300">
+                            <p className="text-xs text-destructive dark:text-red-300">
                               {fieldState.error.message}
                             </p>
                           )}
@@ -283,7 +283,7 @@ export function LoginExperience({
                 <div className="grid gap-2">
                   <Label
                     htmlFor="email"
-                    className="text-zinc-300"
+                    className="dark:text-zinc-300"
                   >
                     Email
                   </Label>
@@ -305,11 +305,11 @@ export function LoginExperience({
                           autoComplete="email"
                           placeholder="you@domain.com"
                           aria-invalid={fieldState.invalid}
-                          className="border-white/10 bg-zinc-950/80 text-zinc-100 placeholder:text-zinc-600"
+                          className="dark:border-white/10 dark:bg-zinc-950/80 dark:text-zinc-100 dark:placeholder:text-zinc-600"
                           {...field}
                         />
                         {fieldState.error?.message && (
-                          <p className="text-xs text-red-300">
+                          <p className="text-xs text-destructive dark:text-red-300">
                             {fieldState.error.message}
                           </p>
                         )}
@@ -320,7 +320,7 @@ export function LoginExperience({
                 <div className="grid gap-2">
                   <Label
                     htmlFor="password"
-                    className="text-zinc-300"
+                    className="dark:text-zinc-300"
                   >
                     Password
                   </Label>
@@ -352,11 +352,11 @@ export function LoginExperience({
                           }
                           placeholder="••••••••"
                           aria-invalid={fieldState.invalid}
-                          className="border-white/10 bg-zinc-950/80 text-zinc-100 placeholder:text-zinc-600"
+                          className="dark:border-white/10 dark:bg-zinc-950/80 dark:text-zinc-100 dark:placeholder:text-zinc-600"
                           {...field}
                         />
                         {fieldState.error?.message && (
-                          <p className="text-xs text-red-300">
+                          <p className="text-xs text-destructive dark:text-red-300">
                             {fieldState.error.message}
                           </p>
                         )}
@@ -366,7 +366,7 @@ export function LoginExperience({
                 </div>
                 {serverError && (
                   <p
-                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200"
+                    className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
                     role="alert"
                   >
                     {serverError}
@@ -374,7 +374,7 @@ export function LoginExperience({
                 )}
                 <Button
                   type="submit"
-                  className="mt-1 w-full bg-teal-600 text-white hover:bg-teal-500"
+                  className="mt-1 w-full"
                   disabled={authMutation.isPending}
                 >
                   {authMutation.isPending
@@ -383,13 +383,13 @@ export function LoginExperience({
                       ? "Sign in"
                       : "Create account"}
                 </Button>
-                <p className="text-center text-sm text-zinc-500">
+                <p className="text-center text-sm text-muted-foreground dark:text-zinc-500">
                   {mode === "sign-in" ? (
                     <>
                       No account?{" "}
                       <button
                         type="button"
-                        className="text-teal-400/90 underline-offset-2 hover:text-teal-300 hover:underline"
+                        className="text-primary underline-offset-2 hover:text-primary/80 hover:underline"
                         onClick={() => switchMode("sign-up")}
                       >
                         Create one
@@ -400,7 +400,7 @@ export function LoginExperience({
                       Already have an account?{" "}
                       <button
                         type="button"
-                        className="text-teal-400/90 underline-offset-2 hover:text-teal-300 hover:underline"
+                        className="text-primary underline-offset-2 hover:text-primary/80 hover:underline"
                         onClick={() => switchMode("sign-in")}
                       >
                         Sign in
@@ -413,18 +413,18 @@ export function LoginExperience({
           </Card>
           <p
             className={cn(
-              "mt-6 text-center text-xs text-zinc-600",
+              "mt-6 text-center text-xs text-muted-foreground dark:text-zinc-600",
               monoFontClassName
             )}
           >
             <Link
               href="/docs"
-              className="text-zinc-500 transition-colors hover:text-teal-400/90"
+              className="text-muted-foreground transition-colors hover:text-primary dark:text-zinc-500 dark:hover:text-primary/90"
             >
               Documentation
             </Link>
-            <span className="mx-2 text-zinc-700">·</span>
-            <span className="text-zinc-600">Press D to toggle app theme</span>
+            <span className="mx-2 text-border dark:text-zinc-700">·</span>
+            <span className="dark:text-zinc-600">Press D to toggle app theme</span>
           </p>
         </div>
       </div>
