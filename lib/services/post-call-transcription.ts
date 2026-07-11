@@ -10,6 +10,43 @@ export type TranscriptSegment = {
   endSecond: number
 }
 
+const TURN_PAUSE_SECONDS = 1.5
+
+function appendSegmentText(current: string, next: string) {
+  const text = next.trim()
+  if (!text) return current
+  if (!current) return text
+  return /^[,.;:!?')\]}]/.test(text)
+    ? `${current}${text}`
+    : `${current} ${text}`
+}
+
+export function mergeTranscriptSegments(
+  segments: TranscriptSegment[],
+  maxPauseSeconds = TURN_PAUSE_SECONDS
+) {
+  const turns: TranscriptSegment[] = []
+  for (const segment of [...segments].sort(
+    (a, b) => a.startSecond - b.startSecond
+  )) {
+    const text = segment.text.trim()
+    if (!text) continue
+    const previous = turns.at(-1)
+    const pause = previous ? segment.startSecond - previous.endSecond : 0
+    if (
+      previous &&
+      previous.role === segment.role &&
+      pause <= maxPauseSeconds
+    ) {
+      previous.text = appendSegmentText(previous.text, text)
+      previous.endSecond = Math.max(previous.endSecond, segment.endSecond)
+      continue
+    }
+    turns.push({ ...segment, text })
+  }
+  return turns
+}
+
 function monoWav(sampleRate: number, samples: Float64Array) {
   const wav = new WaveFile()
   wav.fromScratch(1, sampleRate, "16", samples)
@@ -56,7 +93,7 @@ export async function transcribeRealtimeRecording(input: {
       })
     )
   )
-  const segments = results
+  const wordSegments = results
     .flatMap((result, index) => {
       const source = result.segments.length
         ? result.segments
@@ -71,6 +108,7 @@ export async function transcribeRealtimeRecording(input: {
     })
     .filter((segment) => segment.text.trim().length > 0)
     .sort((a, b) => a.startSecond - b.startSecond)
+  const segments = mergeTranscriptSegments(wordSegments)
   return {
     model: REALTIME_TRANSCRIPTION_MODEL,
     degraded: split.degraded,

@@ -5,7 +5,10 @@ import {
   realtimeModel,
   realtimeModelsForApi,
 } from "@/lib/services/realtime-models"
-import { splitDualChannelWav } from "@/lib/services/post-call-transcription"
+import {
+  mergeTranscriptSegments,
+  splitDualChannelWav,
+} from "@/lib/services/post-call-transcription"
 import { twilioAdapter } from "@/lib/services/twilio-adapter"
 
 describe("realtime voice engine", () => {
@@ -58,5 +61,36 @@ describe("realtime voice engine", () => {
       degraded: true,
       channels: [expect.any(Uint8Array)],
     })
+  })
+
+  it("groups word-level transcription segments into speaker turns", () => {
+    expect(
+      mergeTranscriptSegments([
+        { role: "user", text: "Hi,", startSecond: 0, endSecond: 0.2 },
+        { role: "user", text: "how", startSecond: 0.25, endSecond: 0.4 },
+        { role: "user", text: "are you?", startSecond: 0.45, endSecond: 0.8 },
+        {
+          role: "assistant",
+          text: "I'm good.",
+          startSecond: 1,
+          endSecond: 1.5,
+        },
+        { role: "user", text: "Great.", startSecond: 4, endSecond: 4.4 },
+      ])
+    ).toEqual([
+      {
+        role: "user",
+        text: "Hi, how are you?",
+        startSecond: 0,
+        endSecond: 0.8,
+      },
+      {
+        role: "assistant",
+        text: "I'm good.",
+        startSecond: 1,
+        endSecond: 1.5,
+      },
+      { role: "user", text: "Great.", startSecond: 4, endSecond: 4.4 },
+    ])
   })
 })

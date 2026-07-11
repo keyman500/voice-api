@@ -29,10 +29,16 @@ export function parseTranscript(raw?: string | null): ParsedTranscriptTurn[] {
 
     const match = trimmed.match(TURN_PATTERN)
     if (match) {
-      turns.push({
-        role: normalizeRole(match[1] ?? ""),
-        text: match[2] ?? "",
-      })
+      const role = normalizeRole(match[1] ?? "")
+      const text = match[2] ?? ""
+      const previous = turns.at(-1)
+      if (previous?.role === role) {
+        previous.text = /^[,.;:!?')\]}]/.test(text)
+          ? `${previous.text}${text}`
+          : `${previous.text} ${text}`
+      } else {
+        turns.push({ role, text })
+      }
       continue
     }
 

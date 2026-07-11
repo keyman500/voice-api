@@ -17,9 +17,7 @@ describe("parseTranscript", () => {
 
   it("parses multiple turns", () => {
     expect(
-      parseTranscript(
-        "user: I need help\nassistant: Hello there\nuser: Thanks"
-      )
+      parseTranscript("user: I need help\nassistant: Hello there\nuser: Thanks")
     ).toEqual([
       { role: "user", text: "I need help" },
       { role: "assistant", text: "Hello there" },
@@ -34,20 +32,34 @@ describe("parseTranscript", () => {
     ])
   })
 
+  it("coalesces adjacent segments from the same speaker", () => {
+    expect(
+      parseTranscript(
+        "user: Hi,\nuser: how\nuser: can\nuser: I help?\nassistant: Hello\nassistant: there."
+      )
+    ).toEqual([
+      { role: "user", text: "Hi, how can I help?" },
+      { role: "assistant", text: "Hello there." },
+    ])
+  })
+
   it("parses system and tool roles", () => {
-    expect(parseTranscript("system: Call started\ntool: lookup_account")).toEqual(
-      [
-        { role: "system", text: "Call started" },
-        { role: "tool", text: "lookup_account" },
-      ]
-    )
+    expect(
+      parseTranscript("system: Call started\ntool: lookup_account")
+    ).toEqual([
+      { role: "system", text: "Call started" },
+      { role: "tool", text: "lookup_account" },
+    ])
   })
 
   it("appends unmatched lines to the previous turn", () => {
     expect(
       parseTranscript("assistant: Hello there\nThis continues on the next line")
     ).toEqual([
-      { role: "assistant", text: "Hello there\nThis continues on the next line" },
+      {
+        role: "assistant",
+        text: "Hello there\nThis continues on the next line",
+      },
     ])
   })
 
