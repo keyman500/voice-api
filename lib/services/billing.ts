@@ -35,6 +35,8 @@ export type TokenUsage = {
 
 export type UsageKind =
   | "ai_tokens"
+  | "realtime_audio"
+  | "post_call_transcription"
   | "call_runtime"
   | "post_call_analysis"
   | "success_evaluation"
@@ -393,13 +395,16 @@ export function createBillingService() {
         .filter((row) => row.kind === "call_runtime")
         .reduce((total, row) => total + row.credits, 0)
       const agentCredits = rows
-        .filter((row) => row.kind === "ai_tokens")
+        .filter(
+          (row) => row.kind === "ai_tokens" || row.kind === "realtime_audio"
+        )
         .reduce((total, row) => total + row.credits, 0)
       const postCallCredits = rows
         .filter(
           (row) =>
             row.kind === "post_call_analysis" ||
-            row.kind === "success_evaluation"
+            row.kind === "success_evaluation" ||
+            row.kind === "post_call_transcription"
         )
         .reduce((total, row) => total + row.credits, 0)
       let creditsRemaining = 0
@@ -487,7 +492,10 @@ export function createBillingService() {
       raw?: Record<string, unknown>
     }) {
       if (!Number.isFinite(input.credits) || input.credits <= 0) return null
-      if (input.kind === "call_runtime" && input.callId) {
+      if (
+        ["call_runtime", "post_call_transcription"].includes(input.kind) &&
+        input.callId
+      ) {
         const [existing] = await db
           .select()
           .from(schema.usageLedger)

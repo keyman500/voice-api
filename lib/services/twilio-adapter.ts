@@ -60,6 +60,12 @@ export type ConversationRelayOptions = {
   customParameters?: Record<string, string | undefined>
 }
 
+export type MediaStreamOptions = {
+  websocketUrl: string
+  recordingStatusCallbackUrl?: string
+  customParameters?: Record<string, string | undefined>
+}
+
 export type TwilioAdapter = {
   testCredentials(credentials: TwilioCredentials): Promise<void>
   createCall(
@@ -67,13 +73,15 @@ export type TwilioAdapter = {
     input: TwilioCallInput
   ): Promise<TwilioCallResult>
   conversationRelayTwiML(input: ConversationRelayOptions): string
+  mediaStreamTwiML(input: MediaStreamOptions): string
   getRecording(
     credentials: TwilioCredentials,
     recordingSid: string
   ): Promise<TwilioRecordingMetadata>
   fetchRecordingMedia(
     credentials: TwilioCredentials,
-    recordingSid: string
+    recordingSid: string,
+    options?: { format?: "mp3" | "wav"; channels?: 1 | 2 }
   ): Promise<TwilioRecordingMedia>
   deleteRecording(
     credentials: TwilioCredentials,
@@ -196,6 +204,8 @@ export const twilioAdapter: TwilioAdapter = {
           StatusCallback: input.statusCallbackUrl,
           RecordingStatusCallback: input.recordingStatusCallbackUrl,
           Record: input.record ? "true" : undefined,
+          RecordingChannels: input.record ? "dual" : undefined,
+          RecordingTrack: input.record ? "both" : undefined,
         }),
       }
     )
@@ -264,6 +274,22 @@ export const twilioAdapter: TwilioAdapter = {
     return `<?xml version="1.0" encoding="UTF-8"?><Response>${recording}<Connect><ConversationRelay ${attrs.join(" ")}>${params}</ConversationRelay></Connect></Response>`
   },
 
+  mediaStreamTwiML(input) {
+    const parameters = Object.entries(input.customParameters ?? {})
+      .filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+      .map(
+        ([name, value]) =>
+          `<Parameter name="${escapeXml(name)}" value="${escapeXml(value)}" />`
+      )
+      .join("")
+    const recording = input.recordingStatusCallbackUrl
+      ? `<Start><Recording channels="dual" track="both" recordingStatusCallback="${escapeXml(input.recordingStatusCallbackUrl)}" recordingStatusCallbackMethod="POST" recordingStatusCallbackEvent="completed absent" /></Start>`
+      : ""
+    return `<?xml version="1.0" encoding="UTF-8"?><Response>${recording}<Connect><Stream url="${escapeXml(input.websocketUrl)}">${parameters}</Stream></Connect></Response>`
+  },
+
   async getRecording(credentials, recordingSid) {
     const raw = await twilioJson(
       credentials,
@@ -283,9 +309,13 @@ export const twilioAdapter: TwilioAdapter = {
     }
   },
 
-  async fetchRecordingMedia(credentials, recordingSid) {
+  async fetchRecordingMedia(credentials, recordingSid, options) {
+    const format = options?.format ?? "mp3"
+    const query = options?.channels
+      ? `?RequestedChannels=${options.channels}`
+      : ""
     const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}/Recordings/${recordingSid}.mp3`,
+      `https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}/Recordings/${recordingSid}.${format}${query}`,
       {
         headers: {
           authorization: basicAuth(credentials),
@@ -297,7 +327,9 @@ export const twilioAdapter: TwilioAdapter = {
     }
     return {
       body: res.body,
-      contentType: res.headers.get("content-type") ?? "audio/mpeg",
+      contentType:
+        res.headers.get("content-type") ??
+        (format === "wav" ? "audio/wav" : "audio/mpeg"),
       size: Number(res.headers.get("content-length")) || undefined,
     }
   },

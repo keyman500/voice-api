@@ -116,6 +116,15 @@ export function CallLogDetail({ id }: { id: string }) {
                   label="Provider source"
                   value={call.providerSource ?? "—"}
                 />
+                <KeyValue
+                  label="Voice engine"
+                  value={call.voiceEngine ?? "conversation-relay"}
+                />
+                <KeyValue
+                  label="Realtime model"
+                  value={call.realtimeModel ?? "—"}
+                  mono={Boolean(call.realtimeModel)}
+                />
               </div>
 
               <Separator />
@@ -274,6 +283,21 @@ export function CallLogDetail({ id }: { id: string }) {
                 <p className="mb-2 text-xs tracking-[0.18em] text-muted-foreground uppercase">
                   Transcript
                 </p>
+                {call.voiceEngine === "realtime" ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {call.transcriptionStatus === "failed"
+                        ? (call.transcriptionError ??
+                          "Post-call transcription failed")
+                        : call.transcriptionStatus === "ready"
+                          ? `Canonical recording transcript from ${call.transcriptionModel ?? "the configured transcriber"}`
+                          : "Canonical recording transcript is processing"}
+                    </p>
+                    <StatusBadge
+                      status={call.transcriptionStatus ?? "pending"}
+                    />
+                  </div>
+                ) : null}
                 <CallTranscriptThread transcript={call.transcript} />
               </div>
               <div>

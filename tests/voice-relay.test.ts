@@ -499,6 +499,7 @@ describe("/api/v1 relay routes", () => {
     const res = await handle("/api/v1/agents", {
       method: "POST",
       body: JSON.stringify({
+        voiceEngine: "conversation-relay",
         name: "Support",
         successEvaluationPrompt: "Successful only if a demo is booked.",
         webhookUrl: "https://example.com/webhooks/voice",
@@ -515,6 +516,28 @@ describe("/api/v1 relay routes", () => {
       webhookSecretConfigured: true,
     })
     expect(JSON.stringify(body)).not.toContain("secret-token")
+  })
+
+  it("requires an explicit voice engine for new agents", async () => {
+    const res = await handle("/api/v1/agents", {
+      method: "POST",
+      body: JSON.stringify({ name: "Missing engine" }),
+    })
+    expect(res.status).toBe(422)
+  })
+
+  it("lists supported realtime models", async () => {
+    const res = await handle("/api/v1/realtime-models")
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      maxDurationSeconds: 1440,
+      transcriptionModel: "xai/grok-stt",
+      models: expect.arrayContaining([
+        expect.objectContaining({
+          model: "xai/grok-voice-think-fast-1.0",
+        }),
+      ]),
+    })
   })
 
   it("GET /api/v1/calls forwards callSuccessful filter", async () => {

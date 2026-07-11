@@ -1,9 +1,11 @@
 import { VOICE_API_PROVIDER_ID } from "../voice-constants"
+import type { VoiceEngine } from "./realtime-models"
 
 /** In-memory / wire representation — `startedAt`/`endedAt` as ISO strings in JSON. */
 export type JsonAgent = {
   id: string
   provider: typeof VOICE_API_PROVIDER_ID
+  voiceEngine: VoiceEngine
   name?: string
   voice?: { voiceId: string; provider?: string }
   model?: {
@@ -13,6 +15,7 @@ export type JsonAgent = {
     knowledgeBaseIds?: string[]
   }
   firstMessage?: string
+  maxDurationSeconds?: number
   successEvaluationPrompt?: string
   webhookUrl?: string
   webhookTimeoutSeconds?: number
@@ -27,7 +30,10 @@ export type JsonAgent = {
 export type JsonCall = {
   id: string
   provider: typeof VOICE_API_PROVIDER_ID
+  voiceEngine: VoiceEngine
+  realtimeModel?: string
   agentId?: string
+  direction?: "inbound" | "outbound"
   phoneNumberId?: string
   toNumber?: string
   fromNumber?: string
@@ -49,6 +55,10 @@ export type JsonCall = {
   twilioCallSid?: string
   twilioAccountSid?: string
   relaySessionId?: string
+  transcriptionStatus?: "pending" | "processing" | "ready" | "failed"
+  transcriptionModel?: string
+  transcriptionError?: string
+  terminalReason?: string
   recordingSid?: string
   recordingStatus?: string
   recordingStorageKey?: string

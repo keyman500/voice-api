@@ -130,7 +130,9 @@ function createProcessRepo() {
         items: Array.from(agents.values()),
         hasMore: false,
       })),
-      getAgent: mockAsync(async (_userId, id) => agents.get(String(id)) ?? null),
+      getAgent: mockAsync(
+        async (_userId, id) => agents.get(String(id)) ?? null
+      ),
       updateAgent: mockAsync(async (_userId, id, input) => {
         const current = agents.get(String(id))
         if (!current) return null
@@ -222,7 +224,9 @@ function createProcessRepo() {
         items: Array.from(phones.values()),
         hasMore: false,
       })),
-      getPhoneNumber: mockAsync(async (_userId, id) => phones.get(String(id)) ?? null),
+      getPhoneNumber: mockAsync(
+        async (_userId, id) => phones.get(String(id)) ?? null
+      ),
       updatePhoneNumber: mockAsync(async (_userId, id, input) => {
         const current = phones.get(String(id))
         if (!current) return null
@@ -276,6 +280,7 @@ describe("parked LiveKit /api/v1 endpoint process tests", () => {
     const res = await handle("/api/v1/agents", {
       method: "POST",
       body: JSON.stringify({
+        voiceEngine: "conversation-relay",
         name: "Support",
         voice: { voiceId: "alloy", provider: "openai" },
         model: { provider: "openai", model: "gpt-4.1-mini" },
@@ -402,7 +407,10 @@ describe("parked LiveKit /api/v1 endpoint process tests", () => {
     })
     await handle("/api/v1/agents", {
       method: "POST",
-      body: JSON.stringify({ name: "Support" }),
+      body: JSON.stringify({
+        voiceEngine: "conversation-relay",
+        name: "Support",
+      }),
     })
 
     const res = await handle("/api/v1/calls", {

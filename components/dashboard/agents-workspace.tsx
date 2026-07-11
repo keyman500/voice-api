@@ -55,7 +55,22 @@ type ModelPricingResponse = {
   }>
 }
 
+type RealtimeModelsResponse = {
+  maxDurationSeconds: number
+  transcriptionModel: string
+  pricingLastVerifiedAt: string
+  models: Array<{
+    model: string
+    provider: string
+    name: string
+    voices: string[]
+    estimatedCreditsPerMinute: number | null
+    pricingUnit: string
+  }>
+}
+
 type AgentFormValues = {
+  voiceEngine: "conversation-relay" | "realtime"
   name: string
   voiceId: string
   voiceProvider: string
@@ -76,6 +91,7 @@ type AgentFormValues = {
 }
 
 const defaultValues: AgentFormValues = {
+  voiceEngine: "conversation-relay",
   name: "",
   voiceId: "",
   voiceProvider: "",
@@ -240,6 +256,7 @@ function valuesFromAgent(agent?: JsonAgent | null): AgentFormValues {
   if (!agent) return defaultValues
 
   return {
+    voiceEngine: agent.voiceEngine,
     name: agent.name ?? "",
     voiceId: agent.voice?.voiceId ?? "",
     voiceProvider: agent.voice?.provider ?? "",
@@ -248,14 +265,9 @@ function valuesFromAgent(agent?: JsonAgent | null): AgentFormValues {
     systemPrompt: agent.model?.systemPrompt ?? "",
     knowledgeBaseIds: agent.model?.knowledgeBaseIds?.join("\n") ?? "",
     firstMessage: agent.firstMessage ?? "",
-    maxDurationSeconds:
-      typeof agent.raw === "object" &&
-      agent.raw &&
-      "maxDurationSeconds" in agent.raw
-        ? String(
-            (agent.raw as Record<string, unknown>).maxDurationSeconds ?? ""
-          )
-        : "",
+    maxDurationSeconds: agent.maxDurationSeconds
+      ? String(agent.maxDurationSeconds)
+      : "",
     backgroundSound:
       typeof agent.raw === "object" &&
       agent.raw &&
@@ -296,6 +308,14 @@ async function fetchModelPricing() {
   return data as ModelPricingResponse
 }
 
+async function fetchRealtimeModels() {
+  const { data, error } = await api.v1["realtime-models"].get()
+  if (error) {
+    throw new Error(getApiErrorMessage(error, "Failed to load realtime models"))
+  }
+  return data as RealtimeModelsResponse
+}
+
 function toPayload(values: AgentFormValues) {
   const metadata = parseJsonRecordInput(values.metadata, "Metadata")
   const providerOptions = parseJsonRecordInput(
@@ -305,6 +325,7 @@ function toPayload(values: AgentFormValues) {
   const knowledgeBaseIds = parseListInput(values.knowledgeBaseIds)
 
   return {
+    voiceEngine: values.voiceEngine,
     name: values.name.trim() || undefined,
     voice: values.voiceId.trim()
       ? {
@@ -358,16 +379,33 @@ function AgentForm({
   })
 
   const isEditing = Boolean(selectedAgent)
+  const selectedEngine = form.watch("voiceEngine")
   const selectedVoiceProvider = form.watch("voiceProvider")
   const selectedVoiceId = form.watch("voiceId")
   const selectedModelProvider = form.watch("modelProvider")
   const selectedModelName = form.watch("modelName")
+  const realtimeQuery = useQuery({
+    queryKey: ["realtime-models"],
+    queryFn: fetchRealtimeModels,
+  })
+  const selectedRealtimeModel = realtimeQuery.data?.models.find(
+    (item) => item.model === selectedModelName
+  )
   const voiceOptions = withCurrentValue(
-    LIVEKIT_VOICE_ID_OPTIONS[selectedVoiceProvider] ?? [],
+    selectedEngine === "realtime"
+      ? (selectedRealtimeModel?.voices.map((voice) => ({
+          value: voice,
+          label: voice,
+        })) ?? [])
+      : (LIVEKIT_VOICE_ID_OPTIONS[selectedVoiceProvider] ?? []),
     selectedVoiceId
   )
   const modelOptions = withCurrentValue(
-    LIVEKIT_MODEL_NAME_OPTIONS[selectedModelProvider] ?? [],
+    selectedEngine === "realtime"
+      ? (realtimeQuery.data?.models
+          .filter((item) => item.provider === selectedModelProvider)
+          .map((item) => ({ value: item.model, label: item.name })) ?? [])
+      : (LIVEKIT_MODEL_NAME_OPTIONS[selectedModelProvider] ?? []),
     selectedModelName
   )
   const pricingQuery = useQuery({
@@ -437,6 +475,47 @@ function AgentForm({
     <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
       <InlineError message={submitError} />
 
+      <div className="space-y-2">
+        <Label htmlFor="voice-engine">Voice engine</Label>
+        <Controller
+          name="voiceEngine"
+          control={form.control}
+          render={({ field }) => (
+            <Select
+              value={field.value}
+              onValueChange={(value) => {
+                const engine = value as AgentFormValues["voiceEngine"]
+                field.onChange(engine)
+                form.setValue("voiceProvider", "")
+                form.setValue("voiceId", "")
+                form.setValue("modelProvider", "")
+                form.setValue("modelName", "")
+                if (engine === "realtime") {
+                  form.setValue("maxDurationSeconds", "1440")
+                }
+              }}
+            >
+              <SelectTrigger id="voice-engine" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="conversation-relay">
+                  ConversationRelay
+                </SelectItem>
+                <SelectItem value="realtime">
+                  Realtime speech-to-speech
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+        <p className="text-xs text-muted-foreground">
+          {selectedEngine === "realtime"
+            ? "Twilio audio streams directly to the selected realtime model. The canonical transcript is created from the recording after the call."
+            : "Twilio ConversationRelay manages transcription and speech playback."}
+        </p>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="agent-name">Agent name</Label>
@@ -480,7 +559,19 @@ function AgentForm({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preset provider</SelectItem>
-                  {LIVEKIT_VOICE_PROVIDER_OPTIONS.map((option) => (
+                  {(selectedEngine === "realtime"
+                    ? Array.from(
+                        new Set(
+                          realtimeQuery.data?.models.map(
+                            (item) => item.provider
+                          ) ?? []
+                        )
+                      ).map((provider) => ({
+                        value: provider,
+                        label: provider,
+                      }))
+                    : LIVEKIT_VOICE_PROVIDER_OPTIONS
+                  ).map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -523,8 +614,9 @@ function AgentForm({
             )}
           />
           <p className="text-xs text-muted-foreground">
-            Uses official LiveKit-documented sample voice IDs or voice names for
-            the selected provider.
+            {selectedEngine === "realtime"
+              ? "Only voices supported by the selected realtime model are accepted."
+              : "Uses the documented ConversationRelay provider voice identifiers."}
           </p>
         </div>
         <div className="space-y-2">
@@ -545,6 +637,7 @@ function AgentForm({
                     )
                   ) {
                     form.setValue("modelName", "")
+                    form.setValue("voiceId", "")
                   }
                 }}
               >
@@ -553,7 +646,19 @@ function AgentForm({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preset provider</SelectItem>
-                  {LIVEKIT_MODEL_PROVIDER_OPTIONS.map((option) => (
+                  {(selectedEngine === "realtime"
+                    ? Array.from(
+                        new Set(
+                          realtimeQuery.data?.models.map(
+                            (item) => item.provider
+                          ) ?? []
+                        )
+                      ).map((provider) => ({
+                        value: provider,
+                        label: provider,
+                      }))
+                    : LIVEKIT_MODEL_PROVIDER_OPTIONS
+                  ).map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -571,9 +676,17 @@ function AgentForm({
             render={({ field }) => (
               <Select
                 value={field.value || "none"}
-                onValueChange={(value) =>
-                  field.onChange(value === "none" || !value ? "" : value)
-                }
+                onValueChange={(value) => {
+                  const model = value === "none" || !value ? "" : value
+                  field.onChange(model)
+                  if (selectedEngine === "realtime") {
+                    const capability = realtimeQuery.data?.models.find(
+                      (item) => item.model === model
+                    )
+                    form.setValue("voiceProvider", capability?.provider ?? "")
+                    form.setValue("voiceId", "")
+                  }
+                }}
               >
                 <SelectTrigger id="model-name" className="w-full">
                   <SelectValue
@@ -596,13 +709,24 @@ function AgentForm({
             )}
           />
           <p className="text-xs text-muted-foreground">
-            AI usage is metered by model tokens; call runtime is{" "}
-            {pricingQuery.data?.runtimeCreditsPerStartedMinute ?? 1} credit per
-            started minute.
+            {selectedEngine === "realtime"
+              ? `Realtime model usage is metered from provider audio usage; call runtime remains 1 credit per started minute. Calls are limited to ${realtimeQuery.data?.maxDurationSeconds ?? 1440} seconds.`
+              : `AI usage is metered by model tokens; call runtime is ${pricingQuery.data?.runtimeCreditsPerStartedMinute ?? 1} credit per started minute.`}
           </p>
           {selectedModelName ? (
             <p className="text-xs text-muted-foreground">
-              {selectedModelPricing ? (
+              {selectedEngine === "realtime" ? (
+                selectedRealtimeModel?.estimatedCreditsPerMinute != null ? (
+                  <>
+                    Estimated total:{" "}
+                    {selectedRealtimeModel.estimatedCreditsPerMinute.toFixed(2)}{" "}
+                    credits per active audio minute, including runtime. Provider
+                    prices can change.
+                  </>
+                ) : (
+                  "This provider bills audio tokens; final credits use reported session usage."
+                )
+              ) : selectedModelPricing ? (
                 <>
                   Selected model estimate:{" "}
                   {selectedModelPricing.inputCreditsPer1kTokens.toFixed(4)}{" "}

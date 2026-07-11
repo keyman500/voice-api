@@ -22,8 +22,15 @@ import type {
   PaginatedList,
   RedactedTwilioConfig,
 } from "./voice-types"
+import {
+  REALTIME_MAX_DURATION_SECONDS,
+  realtimeModel,
+  type VoiceEngine,
+} from "./realtime-models"
 import { VoiceServiceError } from "./voice-service"
 import { createVoiceRelayToken } from "./voice-relay-token"
+import { transcribeRealtimeRecording } from "./post-call-transcription"
+import { REALTIME_TRANSCRIPTION_MODEL } from "./realtime-models"
 
 type RecordInput = Record<string, unknown> | undefined
 
@@ -62,6 +69,46 @@ function intFrom(value: unknown) {
     return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
+}
+
+function validateAgentEngine(input: {
+  voiceEngine: VoiceEngine
+  model?: JsonAgent["model"]
+  voice?: JsonAgent["voice"]
+  maxDurationSeconds?: number
+}) {
+  if (input.voiceEngine !== "realtime") return
+  const modelId = input.model?.model
+  const capability = realtimeModel(modelId)
+  if (!capability) {
+    throw new VoiceServiceError(
+      400,
+      "REALTIME_MODEL_UNSUPPORTED",
+      "A supported realtime model is required"
+    )
+  }
+  if (
+    input.model?.provider !== capability.provider ||
+    !input.voice?.voiceId ||
+    !capability.voices.some((voice) => voice === input.voice?.voiceId)
+  ) {
+    throw new VoiceServiceError(
+      400,
+      "REALTIME_VOICE_UNSUPPORTED",
+      "The selected voice is not supported by the realtime model"
+    )
+  }
+  if (
+    input.maxDurationSeconds != null &&
+    (input.maxDurationSeconds <= 0 ||
+      input.maxDurationSeconds > REALTIME_MAX_DURATION_SECONDS)
+  ) {
+    throw new VoiceServiceError(
+      400,
+      "REALTIME_DURATION_INVALID",
+      `Realtime calls cannot exceed ${REALTIME_MAX_DURATION_SECONDS} seconds`
+    )
+  }
 }
 
 function publicBaseUrl(input?: string) {
@@ -155,6 +202,15 @@ function transcriptLine(role: string, text: string) {
   return `${role}: ${text}`
 }
 
+async function bodyBytes(body: Body) {
+  if (body instanceof Uint8Array) return body
+  if (body instanceof ArrayBuffer) return new Uint8Array(body)
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer())
+  return new Uint8Array(
+    await new Response(body as ReadableStream).arrayBuffer()
+  )
+}
+
 function webhookSignature(secret: string, timestamp: string, body: string) {
   return crypto
     .createHmac("sha256", secret)
@@ -208,6 +264,21 @@ function relayOptions(
     customParameters: {
       callId,
       agentId: agent?.id,
+    },
+  }
+}
+
+function realtimeOptions(agent: JsonAgent, callId: string, baseUrl?: string) {
+  const token = createVoiceRelayToken({ callId })
+  return {
+    // Twilio Media Streams discard query strings from the <Stream> URL.
+    // Keep the signed credentials in path segments so they survive the handshake.
+    websocketUrl: `${wsBaseUrl(baseUrl)}/api/v1/realtime/ws/${encodeURIComponent(callId)}/${encodeURIComponent(token)}`,
+    recordingStatusCallbackUrl: `${publicBaseUrl(baseUrl)}/api/v1/twilio/recording?callId=${encodeURIComponent(callId)}`,
+    customParameters: {
+      callId,
+      agentId: agent.id,
+      model: agent.model?.model,
     },
   }
 }
@@ -319,6 +390,7 @@ export function createVoiceRelayService(
     async createAgent(
       userId: string,
       input: {
+        voiceEngine: VoiceEngine
         name?: string
         voice?: JsonAgent["voice"]
         model?: JsonAgent["model"]
@@ -334,12 +406,17 @@ export function createVoiceRelayService(
         providerOptions?: RecordInput
       }
     ) {
+      validateAgentEngine(input)
       return repo.createAgent(userId, {
+        voiceEngine: input.voiceEngine,
         name: input.name,
         voice: input.voice ?? null,
         model: input.model ?? null,
         firstMessage: input.firstMessage,
-        maxDurationSeconds: input.maxDurationSeconds,
+        maxDurationSeconds:
+          input.voiceEngine === "realtime"
+            ? (input.maxDurationSeconds ?? REALTIME_MAX_DURATION_SECONDS)
+            : input.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
         voicemailMessage: input.voicemailMessage,
         successEvaluationPrompt: input.successEvaluationPrompt,
@@ -356,6 +433,7 @@ export function createVoiceRelayService(
       userId: string,
       id: string,
       input: {
+        voiceEngine?: VoiceEngine
         name?: string
         voice?: JsonAgent["voice"]
         model?: JsonAgent["model"]
@@ -371,7 +449,16 @@ export function createVoiceRelayService(
         providerOptions?: RecordInput
       }
     ) {
+      const current = await repo.getAgent(userId, id)
+      if (!current) return null
+      validateAgentEngine({
+        voiceEngine: input.voiceEngine ?? current.voiceEngine,
+        model: input.model ?? current.model,
+        voice: input.voice ?? current.voice,
+        maxDurationSeconds: input.maxDurationSeconds,
+      })
       return repo.updateAgent(userId, id, {
+        voiceEngine: input.voiceEngine,
         name: input.name,
         voice: input.voice ?? undefined,
         model: input.model ?? undefined,
@@ -483,6 +570,11 @@ export function createVoiceRelayService(
         agentId: input.agentId,
         direction: "outbound",
         status: "queued",
+        voiceEngine: agent?.voiceEngine ?? "conversation-relay",
+        realtimeModel:
+          agent?.voiceEngine === "realtime" ? agent.model?.model : undefined,
+        transcriptionStatus:
+          agent?.voiceEngine === "realtime" ? "pending" : undefined,
         postCallStatus: "pending",
         analysisStatus: "pending",
         successEvaluationStatus: "pending",
@@ -982,6 +1074,11 @@ export function createVoiceRelayService(
           agentId: phone.inboundAgentId,
           direction: "inbound",
           status: "ringing",
+          voiceEngine: agent.voiceEngine,
+          realtimeModel:
+            agent.voiceEngine === "realtime" ? agent.model?.model : undefined,
+          transcriptionStatus:
+            agent.voiceEngine === "realtime" ? "pending" : undefined,
           postCallStatus: "pending",
           analysisStatus: "pending",
           successEvaluationStatus: "pending",
@@ -1035,12 +1132,35 @@ export function createVoiceRelayService(
       await repo.addCallEvent(userId, call.id, "twilio.voice.answered", {
         callSid: formValue(input.params, "CallSid", "callSid"),
       })
-      const options = relayOptions(agent, call.id, credentialsBaseUrl)
       const callRaw =
         call.raw && typeof call.raw === "object"
           ? (call.raw as Record<string, unknown>)
           : undefined
       const isInbound = Boolean(callRaw?.twilio && !input.callId)
+      if (agent?.voiceEngine === "realtime") {
+        const configured = realtimeOptions(agent, call.id, credentialsBaseUrl)
+        const options = isInbound
+          ? configured
+          : { ...configured, recordingStatusCallbackUrl: undefined }
+        await repo.updateCall(userId, call.id, {
+          voiceEngine: "realtime",
+          realtimeModel: agent.model?.model,
+          transcriptionStatus: "pending",
+        })
+        await repo.addCallEvent(
+          userId,
+          call.id,
+          "twilio.voice.twiml.generated",
+          {
+            callSid: callbackTwilioCallSid(input.params),
+            voiceEngine: "realtime",
+            websocketUrl: redactRelayToken(options.websocketUrl),
+            recordingStatusCallbackUrl: options.recordingStatusCallbackUrl,
+          }
+        )
+        return twilio.mediaStreamTwiML(options)
+      }
+      const options = relayOptions(agent, call.id, credentialsBaseUrl)
       const twimlOptions = isInbound
         ? {
             ...options,
@@ -1069,6 +1189,20 @@ export function createVoiceRelayService(
     async resolveRelayCall(callId: string) {
       const found = await repo.findCallById(callId)
       return found ? { call: found, userId: found.userId } : null
+    },
+
+    async recordCallEvent(input: {
+      userId: string
+      callId: string
+      type: string
+      payload?: Record<string, unknown>
+    }) {
+      await repo.addCallEvent(
+        input.userId,
+        input.callId,
+        input.type,
+        input.payload
+      )
     },
 
     async handleStatusWebhook(input: {
@@ -1304,6 +1438,13 @@ export function createVoiceRelayService(
         recordingIngestionError: null,
         analysisError: null,
         successEvaluationError: null,
+        transcriptionStatus:
+          call.voiceEngine === "realtime" ? "processing" : undefined,
+        transcriptionModel:
+          call.voiceEngine === "realtime"
+            ? REALTIME_TRANSCRIPTION_MODEL
+            : undefined,
+        transcriptionError: call.voiceEngine === "realtime" ? null : undefined,
       })
       await repo.addCallEvent(input.userId, input.callId, "post_call.started")
 
@@ -1345,14 +1486,18 @@ export function createVoiceRelayService(
             `Twilio recording is ${metadata.status}`
           )
         }
-        const media = await twilio.fetchRecordingMedia(
-          credentials,
-          recordingSid
-        )
+        const media =
+          call.voiceEngine === "realtime"
+            ? await twilio.fetchRecordingMedia(credentials, recordingSid, {
+                format: "wav",
+                channels: 2,
+              })
+            : await twilio.fetchRecordingMedia(credentials, recordingSid)
+        const mediaBytes = await bodyBytes(media.body)
         const uploaded = await files.uploadRecording({
           callId: input.callId,
           recordingSid,
-          body: media.body,
+          body: mediaBytes,
           contentType: media.contentType,
         })
         const stored = await files.headRecording(uploaded.key)
@@ -1374,6 +1519,80 @@ export function createVoiceRelayService(
           }
         )
 
+        let transcriptionReady = call.voiceEngine !== "realtime"
+        if (call.voiceEngine === "realtime") {
+          try {
+            const transcription = await transcribeRealtimeRecording({
+              bytes: mediaBytes,
+              direction: call.direction,
+            })
+            await repo.clearTranscriptItems(input.userId, input.callId)
+            for (const [index, segment] of transcription.segments.entries()) {
+              await repo.addTranscriptItem(input.userId, {
+                callId: input.callId,
+                role: segment.role,
+                text: segment.text,
+                status: "final",
+                sequence: index + 1,
+                raw: {
+                  source: "post-call-recording",
+                  startSecond: segment.startSecond,
+                  endSecond: segment.endSecond,
+                  degraded: transcription.degraded,
+                },
+              })
+            }
+            await repo.updateCall(input.userId, input.callId, {
+              transcript: transcription.text,
+              transcriptionStatus: "ready",
+              transcriptionModel: transcription.model,
+              transcriptionError: null,
+            })
+            const channelCount = transcription.degraded ? 1 : 2
+            const providerCostUsd =
+              (transcription.durationSeconds / 3600) * 0.1 * channelCount
+            if (providerCostUsd > 0) {
+              await billing.recordUsage({
+                userId: input.userId,
+                callId: input.callId,
+                agentId: call.agentId,
+                kind: "post_call_transcription",
+                model: transcription.model,
+                durationSeconds:
+                  Math.ceil(transcription.durationSeconds) * channelCount,
+                credits: providerCostUsd * 1.5 * 100,
+                providerCostUsd,
+                billableUsd: providerCostUsd * 1.5,
+                raw: { channelCount, degraded: transcription.degraded },
+              })
+            }
+            transcriptionReady = true
+            await repo.addCallEvent(
+              input.userId,
+              input.callId,
+              "transcription.ready",
+              {
+                model: transcription.model,
+                segments: transcription.segments.length,
+                degraded: transcription.degraded,
+              }
+            )
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Transcription failed"
+            await repo.updateCall(input.userId, input.callId, {
+              transcriptionStatus: "failed",
+              transcriptionError: message,
+            })
+            await repo.addCallEvent(
+              input.userId,
+              input.callId,
+              "transcription.failed",
+              { message }
+            )
+          }
+        }
+
         if (credentials.deleteTwilioRecordingAfterBlobUpload) {
           await twilio.deleteRecording(credentials, recordingSid)
           await repo.updateCall(input.userId, input.callId, {
@@ -1391,6 +1610,9 @@ export function createVoiceRelayService(
 
         let analysisResult: Record<string, unknown> | undefined
         try {
+          if (!transcriptionReady) {
+            throw new Error("Post-call transcript is unavailable")
+          }
           const refreshed = await repo.getCall(input.userId, input.callId)
           const analysisResponse = await llm.analyzeCall({
             callId: input.callId,
@@ -1437,6 +1659,9 @@ export function createVoiceRelayService(
         }
 
         try {
+          if (!transcriptionReady) {
+            throw new Error("Post-call transcript is unavailable")
+          }
           const refreshed = await repo.getCall(input.userId, input.callId)
           const agent = refreshed?.agentId
             ? await repo.getAgent(input.userId, refreshed.agentId)

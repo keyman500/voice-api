@@ -81,10 +81,12 @@ function toAgent(row: typeof schema.voiceAgent.$inferSelect): JsonAgent {
   return {
     id: row.id,
     provider: VOICE_API_PROVIDER_ID,
+    voiceEngine: row.voiceEngine as JsonAgent["voiceEngine"],
     name: row.name ?? undefined,
     voice: (row.voice as JsonAgent["voice"]) ?? undefined,
     model: (row.model as JsonAgent["model"]) ?? undefined,
     firstMessage: row.firstMessage ?? undefined,
+    maxDurationSeconds: row.maxDurationSeconds ?? undefined,
     successEvaluationPrompt: row.successEvaluationPrompt ?? undefined,
     webhookUrl: row.webhookUrl ?? undefined,
     webhookTimeoutSeconds: row.webhookTimeoutSeconds ?? undefined,
@@ -104,6 +106,9 @@ function toCall(
   return {
     id: row.id,
     provider: VOICE_API_PROVIDER_ID,
+    voiceEngine: row.voiceEngine as JsonCall["voiceEngine"],
+    realtimeModel: row.realtimeModel ?? undefined,
+    direction: row.direction as JsonCall["direction"],
     agentId: row.agentId ?? undefined,
     phoneNumberId: row.phoneNumberId ?? undefined,
     toNumber: row.toNumber ?? undefined,
@@ -126,6 +131,11 @@ function toCall(
     twilioCallSid: row.twilioCallSid ?? undefined,
     twilioAccountSid: row.twilioAccountSid ?? undefined,
     relaySessionId: row.relaySessionId ?? undefined,
+    transcriptionStatus:
+      (row.transcriptionStatus as JsonCall["transcriptionStatus"]) ?? undefined,
+    transcriptionModel: row.transcriptionModel ?? undefined,
+    transcriptionError: row.transcriptionError ?? undefined,
+    terminalReason: row.terminalReason ?? undefined,
     recordingSid: row.recordingSid ?? undefined,
     recordingStatus: row.recordingStatus ?? undefined,
     recordingStorageKey: row.recordingStorageKey ?? undefined,
@@ -726,6 +736,17 @@ export function createVoiceRepository() {
           )
         )
       return rows.map(toTranscriptItem).sort((a, b) => a.sequence - b.sequence)
+    },
+
+    async clearTranscriptItems(userId: string, callId: string) {
+      await db
+        .delete(schema.voiceTranscriptItem)
+        .where(
+          and(
+            eq(schema.voiceTranscriptItem.userId, userId),
+            eq(schema.voiceTranscriptItem.callId, callId)
+          )
+        )
     },
 
     async createPhoneNumber(

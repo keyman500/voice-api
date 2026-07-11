@@ -16,6 +16,11 @@ export const modelConfig = t.Object({
   knowledgeBaseIds: t.Optional(t.Array(t.String())),
 })
 
+export const voiceEngine = t.Union([
+  t.Literal("conversation-relay"),
+  t.Literal("realtime"),
+])
+
 /** Loose JSON object for metadata / passthrough. */
 export const recordUnknown = t.Record(t.String(), t.Unknown())
 
@@ -44,6 +49,7 @@ export const standardErrorResponses = {
 export const okResponse = t.Object({ ok: t.Boolean() })
 
 export const createAgentBody = t.Object({
+  voiceEngine,
   name: t.Optional(t.String()),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
@@ -60,6 +66,7 @@ export const createAgentBody = t.Object({
 })
 
 export const updateAgentBody = t.Object({
+  voiceEngine: t.Optional(voiceEngine),
   name: t.Optional(t.String()),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
@@ -176,10 +183,12 @@ export const billingCheckoutBody = t.Object({
 export const agentResponse = t.Object({
   id: t.String(),
   provider: t.String(),
+  voiceEngine: t.Optional(voiceEngine),
   name: t.Optional(nullableString),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
   firstMessage: t.Optional(nullableString),
+  maxDurationSeconds: t.Optional(nullableNumber),
   successEvaluationPrompt: t.Optional(nullableString),
   webhookUrl: t.Optional(nullableString),
   webhookTimeoutSeconds: t.Optional(nullableNumber),
@@ -200,6 +209,9 @@ export const agentListResponse = t.Object({
 export const callResponse = t.Object({
   id: t.String(),
   provider: t.String(),
+  voiceEngine: t.Optional(voiceEngine),
+  realtimeModel: t.Optional(nullableString),
+  direction: t.Optional(t.Union([t.Literal("inbound"), t.Literal("outbound")])),
   agentId: t.Optional(nullableString),
   phoneNumberId: t.Optional(nullableString),
   toNumber: t.Optional(nullableString),
@@ -209,6 +221,17 @@ export const callResponse = t.Object({
   endedAt: t.Optional(nullableString),
   duration: t.Optional(nullableNumber),
   transcript: t.Optional(nullableString),
+  transcriptionStatus: t.Optional(
+    t.Union([
+      t.Literal("pending"),
+      t.Literal("processing"),
+      t.Literal("ready"),
+      t.Literal("failed"),
+    ])
+  ),
+  transcriptionModel: t.Optional(nullableString),
+  transcriptionError: t.Optional(nullableString),
+  terminalReason: t.Optional(nullableString),
   recordingUrl: t.Optional(nullableString),
   analysis: t.Optional(nullableRecordUnknown),
   postCallStatus: t.Optional(
@@ -442,6 +465,26 @@ export const modelPricingResponse = t.Object({
       source: t.String(),
       inputCreditsPer1kTokens: t.Number(),
       outputCreditsPer1kTokens: t.Number(),
+    })
+  ),
+})
+
+export const realtimeModelsResponse = t.Object({
+  pricingLastVerifiedAt: t.String(),
+  maxDurationSeconds: t.Number(),
+  transcriptionModel: t.String(),
+  models: t.Array(
+    t.Object({
+      model: t.String(),
+      provider: t.String(),
+      name: t.String(),
+      voices: t.Array(t.String()),
+      estimatedProviderUsdPerMinute: t.Union([t.Number(), t.Null()]),
+      estimatedCreditsPerMinute: t.Union([t.Number(), t.Null()]),
+      pricingUnit: t.String(),
+      audioInputUsdPerToken: t.Union([t.Number(), t.Null()]),
+      audioOutputUsdPerToken: t.Union([t.Number(), t.Null()]),
+      available: t.Boolean(),
     })
   ),
 })

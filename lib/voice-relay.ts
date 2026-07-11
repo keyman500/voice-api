@@ -6,6 +6,7 @@ import { getBillingService } from "./services/billing"
 import { getPostCallWorkflowStarter } from "./services/post-call-workflow-runner"
 import { getVoiceRelayService } from "./services/voice-relay-service"
 import * as s from "./v1-schemas"
+import { realtimeModelsForApi } from "./services/realtime-models"
 
 type RouteCtx = { authed: AuthedContext }
 
@@ -220,6 +221,15 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       tags: ["Billing"],
     },
   })
+  .get("/realtime-models", () => realtimeModelsForApi(), {
+    response: { 200: s.realtimeModelsResponse },
+    detail: {
+      summary: "List supported realtime voice models",
+      description:
+        "Returns realtime model and voice capabilities, session limits, and estimated Voice-credit pricing. Estimates can change when providers reprice models.",
+      tags: ["Agents"],
+    },
+  })
 
   .get(
     "/agents",
@@ -262,6 +272,7 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
     "/agents",
     async ({ authed, body }) =>
       await getVoiceRelayService().createAgent(authed.user.id, {
+        voiceEngine: body.voiceEngine,
         name: body.name,
         voice: body.voice,
         model: body.model,
@@ -290,6 +301,7 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         authed.user.id,
         params.id,
         {
+          voiceEngine: body.voiceEngine,
           name: body.name,
           voice: body.voice,
           model: body.model,
