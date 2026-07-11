@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
   RiBankCardLine,
+  RiBookOpenLine,
   RiComputerLine,
   RiExpandUpDownLine,
   RiFileList3Line,
@@ -46,14 +47,17 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { PostHogIdentify } from "@/components/dashboard/posthog-identify"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSession, signOut } from "@/lib/auth-client"
+import posthog from "posthog-js"
 
 type NavItem = {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
   match?: "exact" | "prefix"
+  external?: boolean
 }
 
 const mainNav: NavItem[] = [
@@ -99,9 +103,16 @@ const mainNav: NavItem[] = [
     icon: RiSettings3Line,
     match: "prefix",
   },
+  {
+    href: "/api/openapi",
+    label: "API docs",
+    icon: RiBookOpenLine,
+    external: true,
+  },
 ]
 
 function navItemActive(pathname: string, item: NavItem): boolean {
+  if (item.external) return false
   if (item.match === "exact") return pathname === item.href
   return pathname === item.href || pathname.startsWith(`${item.href}/`)
 }
@@ -130,6 +141,9 @@ export function DashboardShell({ children }: DashboardShellProps) {
   const { data: session } = useSession()
 
   const handleSignOut = async () => {
+    if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
+      posthog.reset()
+    }
     await signOut({
       fetchOptions: {
         onSuccess: () => {
@@ -147,6 +161,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
 
   return (
     <SidebarProvider className="h-svh min-h-0">
+      <PostHogIdentify user={session.user} />
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>
@@ -187,10 +202,21 @@ export function DashboardShell({ children }: DashboardShellProps) {
                     isActive={navItemActive(pathname, item)}
                     tooltip={item.label}
                   >
-                    <Link href={item.href}>
-                      <item.icon className="size-4" />
-                      <span>{item.label}</span>
-                    </Link>
+                    {item.external ? (
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <item.icon className="size-4" />
+                        <span>{item.label}</span>
+                      </a>
+                    ) : (
+                      <Link href={item.href}>
+                        <item.icon className="size-4" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

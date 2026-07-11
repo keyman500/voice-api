@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals"
 import {
   creditsForRuntime,
   creditsForTokenUsage,
+  polarUsageMetadata,
   reconcileCreditBalance,
 } from "@/lib/services/billing"
 
@@ -59,5 +60,28 @@ describe("voice credit accounting", () => {
     expect(result.priced).toBe(true)
     expect(result.providerCostUsd).toBeCloseTo(0.00042)
     expect(result.credits).toBeCloseTo(0.063)
+  })
+
+  it("omits empty optional metadata from runtime events sent to Polar", () => {
+    expect(
+      polarUsageMetadata({
+        kind: "call_runtime",
+        callId: "call-1",
+        durationSeconds: 40,
+        credits: 1,
+      })
+    ).toEqual({
+      credits: 1,
+      voice_credit_usage: 1,
+      kind: "call_runtime",
+      callId: "call-1",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      durationSeconds: 40,
+      providerCostUsd: 0,
+      billableUsd: 0.01,
+      markup: 0,
+    })
   })
 })

@@ -110,7 +110,7 @@ export const llmAdapter: LlmAdapter = {
       system:
         "You analyze phone call transcripts for an operator dashboard. Return only compact JSON.",
       prompt: JSON.stringify({
-        task: "Analyze this voice call. Return JSON with summary, outcome, sentiment, actionItems, keyMoments, and transcriptQualityNotes.",
+        task: "Analyze this voice call. Return JSON with summary (string), outcome (string), sentiment (string), actionItems (string[]), keyMoments ({text: string, timestamp: string}[] where timestamp is mm:ss from call start when known), and transcriptQualityNotes (string).",
         transcript: transcript ?? "",
         events: events?.slice(-40) ?? [],
       }),

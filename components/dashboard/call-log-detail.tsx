@@ -25,6 +25,7 @@ import {
   KeyValue,
   StatusBadge,
 } from "@/components/dashboard/control-room-ui"
+import { CallAnalysisPanel } from "@/components/dashboard/call-analysis-panel"
 import { CallTranscriptThread } from "@/components/dashboard/call-transcript-thread"
 import type { JsonCall } from "@/lib/services/voice-types"
 
@@ -114,22 +115,6 @@ export function CallLogDetail({ id }: { id: string }) {
                 <KeyValue
                   label="Provider source"
                   value={call.providerSource ?? "—"}
-                />
-                <KeyValue label="Room name" value={call.roomName ?? "—"} mono />
-                <KeyValue
-                  label="SIP participant"
-                  value={call.livekitSipParticipantId ?? "—"}
-                  mono
-                />
-                <KeyValue
-                  label="SIP call ID"
-                  value={call.livekitSipCallId ?? "—"}
-                  mono
-                />
-                <KeyValue
-                  label="SIP trunk ID"
-                  value={call.livekitSipTrunkId ?? "—"}
-                  mono
                 />
               </div>
 
@@ -295,16 +280,10 @@ export function CallLogDetail({ id }: { id: string }) {
                 <p className="mb-2 text-xs tracking-[0.18em] text-muted-foreground uppercase">
                   Analysis
                 </p>
-                <JsonPreview
-                  value={call.analysis}
-                  emptyLabel={
-                    call.analysisStatus === "processing" ||
-                    call.analysisStatus === "pending"
-                      ? "Analysis is processing."
-                      : call.analysisStatus === "failed"
-                        ? (call.analysisError ?? "Analysis failed.")
-                        : "No analysis stored for this call."
-                  }
+                <CallAnalysisPanel
+                  analysis={call.analysis}
+                  analysisStatus={call.analysisStatus}
+                  analysisError={call.analysisError}
                 />
               </div>
               <div>

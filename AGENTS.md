@@ -86,5 +86,7 @@ Next.js App Router
 | `DATABASE_URL`       | ✅       | Neon PostgreSQL connection string                  |
 | `BETTER_AUTH_SECRET` | ✅       | At least 32-character random secret                |
 | `BETTER_AUTH_URL`    | ✅       | Base URL of the app (e.g. `http://localhost:3000`) |
+| `NEXT_PUBLIC_POSTHOG_KEY` | —   | PostHog project API key (client analytics; optional) |
+| `NEXT_PUBLIC_POSTHOG_HOST` | —  | PostHog API host (default `https://us.i.posthog.com`) |
 
 Copy `.env.example` → `.env.local` and fill in values before running.

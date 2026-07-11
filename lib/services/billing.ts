@@ -215,6 +215,35 @@ export function modelPricingForApi() {
   }))
 }
 
+export function polarUsageMetadata(input: {
+  kind: UsageKind
+  callId?: string
+  agentId?: string
+  model?: string
+  usage?: TokenUsage
+  durationSeconds?: number
+  credits: number
+  providerCostUsd?: number
+  billableUsd?: number
+}) {
+  return {
+    credits: input.credits,
+    // Compatibility for meters configured to sum the event-name property.
+    [VOICE_CREDIT_EVENT_NAME]: input.credits,
+    kind: input.kind,
+    ...(input.callId ? { callId: input.callId } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    inputTokens: input.usage?.inputTokens ?? 0,
+    outputTokens: input.usage?.outputTokens ?? 0,
+    totalTokens: input.usage?.totalTokens ?? 0,
+    durationSeconds: input.durationSeconds ?? 0,
+    providerCostUsd: input.providerCostUsd ?? 0,
+    billableUsd: input.billableUsd ?? input.credits * VOICE_CREDIT_USD,
+    markup: input.providerCostUsd ? AI_USAGE_MARKUP : 0,
+  }
+}
+
 function configuredProductId(plan: VoiceCreditPlanId) {
   return process.env[VOICE_CREDIT_PLANS[plan].productEnv]?.trim()
 }
@@ -507,21 +536,7 @@ export function createBillingService() {
               externalCustomerId: input.userId,
               externalId: id,
               timestamp: new Date(),
-              metadata: {
-                credits: input.credits,
-                kind: input.kind,
-                callId: input.callId ?? "",
-                agentId: input.agentId ?? "",
-                model: input.model ?? "",
-                inputTokens: input.usage?.inputTokens ?? 0,
-                outputTokens: input.usage?.outputTokens ?? 0,
-                totalTokens: input.usage?.totalTokens ?? 0,
-                durationSeconds: input.durationSeconds ?? 0,
-                providerCostUsd: input.providerCostUsd ?? 0,
-                billableUsd:
-                  input.billableUsd ?? input.credits * VOICE_CREDIT_USD,
-                markup: input.providerCostUsd ? AI_USAGE_MARKUP : 0,
-              },
+              metadata: polarUsageMetadata(input),
             },
           ],
         })
