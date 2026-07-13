@@ -113,7 +113,6 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
         accountSid: body.accountSid,
         authToken: body.authToken,
         defaultFromNumber: body.defaultFromNumber,
-        defaultWebhookBaseUrl: body.defaultWebhookBaseUrl,
         deleteTwilioRecordingAfterBlobUpload:
           body.deleteTwilioRecordingAfterBlobUpload,
       }),

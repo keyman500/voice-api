@@ -352,7 +352,6 @@ export function createVoiceRelayService(
         accountSid: string
         authToken: string
         defaultFromNumber?: string
-        defaultWebhookBaseUrl?: string
         deleteTwilioRecordingAfterBlobUpload?: boolean
       }
     ) {

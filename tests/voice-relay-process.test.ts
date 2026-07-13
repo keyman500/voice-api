@@ -37,7 +37,7 @@ function createProcessRepo() {
         providerSource: "user",
         accountSidPrefix: String(row.accountSid).slice(0, 8),
         defaultFromNumber: row.defaultFromNumber,
-        defaultWebhookBaseUrl: row.defaultWebhookBaseUrl,
+        defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
         deleteTwilioRecordingAfterBlobUpload:
           row.deleteTwilioRecordingAfterBlobUpload ?? false,
         updatedAt: row.updatedAt,
@@ -54,7 +54,7 @@ function createProcessRepo() {
         providerSource: "user",
         accountSidPrefix: String(row.accountSid).slice(0, 8),
         defaultFromNumber: row.defaultFromNumber,
-        defaultWebhookBaseUrl: row.defaultWebhookBaseUrl,
+        defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
         deleteTwilioRecordingAfterBlobUpload:
           row.deleteTwilioRecordingAfterBlobUpload ?? false,
         updatedAt: row.updatedAt,
@@ -70,7 +70,7 @@ function createProcessRepo() {
         accountSid: row.accountSid,
         authToken: row.authToken,
         defaultFromNumber: row.defaultFromNumber,
-        defaultWebhookBaseUrl: row.defaultWebhookBaseUrl,
+        defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
         deleteTwilioRecordingAfterBlobUpload:
           row.deleteTwilioRecordingAfterBlobUpload ?? false,
         source: "user",
@@ -411,6 +411,7 @@ function createBillingMock() {
 
 beforeEach(() => {
   delete process.env.TWILIO_WEBHOOK_USER_ID
+  process.env.TWILIO_WEBHOOK_BASE_URL = "https://voice.example.com"
   setBillingServiceForTests(createBillingMock() as never)
 })
 
@@ -429,7 +430,6 @@ describe("voice relay service process behavior", () => {
       accountSid: "AC123456789",
       authToken: "token",
       defaultFromNumber: "+15555550123",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
 
     const call = await service.createCall(fakeUser.id, {
@@ -475,7 +475,6 @@ describe("voice relay service process behavior", () => {
       accountSid: "AC123456789",
       authToken: "token",
       defaultFromNumber: "+15555550123",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
 
     await service.createCall(fakeUser.id, { toNumber: "+15555550100" })
@@ -499,7 +498,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
 
     const result = await service.importPhoneNumbers(fakeUser.id)
@@ -546,7 +544,6 @@ describe("voice relay service process behavior", () => {
       accountSid: "AC123456789",
       authToken: "token",
       defaultFromNumber: "+15555550123",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
 
     await expect(
@@ -573,7 +570,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createPhoneNumber(fakeUser.id, {
       number: "+15555550999",
@@ -609,7 +605,6 @@ describe("voice relay service process behavior", () => {
       accountSid: "AC123456789",
       authToken: "token",
       defaultFromNumber: "+15555550999",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createAgent(fakeUser.id, { name: "Agent" })
     const phone = await service.createPhoneNumber(fakeUser.id, {
@@ -649,7 +644,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     const phone = await service.createPhoneNumber(fakeUser.id, {
       number: "+15555550123",
@@ -701,7 +695,7 @@ describe("voice relay service process behavior", () => {
     )
   })
 
-  it("validates Twilio signatures against the configured webhook base URL", async () => {
+  it("validates Twilio signatures against the platform webhook base URL", async () => {
     const { repo } = createProcessRepo()
     const twilio = createTwilioMock()
     const service = createVoiceRelayService(
@@ -714,7 +708,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     twilio.validateSignature.mockImplementation(
       (input: { url: string }) =>
@@ -749,7 +742,6 @@ describe("voice relay service process behavior", () => {
       accountSid: "AC123456789",
       authToken: "token",
       defaultFromNumber: "+15555550123",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createAgent(fakeUser.id, { name: "Support" })
     const call = await service.createCall(fakeUser.id, {
@@ -806,7 +798,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createPhoneNumber(fakeUser.id, {
       number: "+15555550123",
@@ -859,7 +850,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createPhoneNumber(fakeUser.id, {
       number: "+15555550123",
@@ -908,7 +898,6 @@ describe("voice relay service process behavior", () => {
     await service.upsertTwilioConfig(fakeUser.id, {
       accountSid: "AC123456789",
       authToken: "token",
-      defaultWebhookBaseUrl: "https://voice.example.com",
     })
     await service.createPhoneNumber(fakeUser.id, {
       number: "+15555550123",

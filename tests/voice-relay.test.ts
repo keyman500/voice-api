@@ -60,9 +60,7 @@ function createMockRelayService() {
       providerSource: twilioConfigured ? "user" : "none",
       accountSidPrefix: twilioConfigured ? "AC123456" : undefined,
       defaultFromNumber: twilioConfigured ? "+15555550123" : undefined,
-      defaultWebhookBaseUrl: twilioConfigured
-        ? "https://voice.example.com"
-        : undefined,
+      defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
       deleteTwilioRecordingAfterBlobUpload: false,
       updatedAt: twilioConfigured ? "2024-01-01T00:00:00.000Z" : undefined,
     })),
@@ -74,7 +72,7 @@ function createMockRelayService() {
           providerSource: "user",
           accountSidPrefix: String(input.accountSid).slice(0, 8),
           defaultFromNumber: input.defaultFromNumber,
-          defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
+          defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
           deleteTwilioRecordingAfterBlobUpload:
             input.deleteTwilioRecordingAfterBlobUpload ?? false,
           updatedAt: "2024-01-01T00:00:00.000Z",
@@ -394,7 +392,6 @@ describe("/api/v1 relay routes", () => {
         accountSid: "AC123456789",
         authToken: "secret-token",
         defaultFromNumber: "+15555550123",
-        defaultWebhookBaseUrl: "https://voice.example.com",
         deleteTwilioRecordingAfterBlobUpload: true,
       }),
     })
