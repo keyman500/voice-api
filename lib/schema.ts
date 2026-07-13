@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core"
 
 // ---------------------------------------------------------------------------
@@ -412,5 +413,28 @@ export const usageLedger = pgTable(
     index("usage_ledger_call_id_idx").on(table.callId),
     index("usage_ledger_kind_idx").on(table.kind),
     index("usage_ledger_polar_ingest_status_idx").on(table.polarIngestStatus),
+  ]
+)
+
+/** Local promo / signup credit grants (independent of Polar meters). */
+export const creditGrants = pgTable(
+  "credit_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    credits: doublePrecision("credits").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("credit_grants_user_id_idx").on(table.userId),
+    uniqueIndex("credit_grants_user_id_reason_uidx").on(
+      table.userId,
+      table.reason
+    ),
   ]
 )
