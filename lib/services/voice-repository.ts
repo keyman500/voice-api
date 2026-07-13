@@ -357,7 +357,7 @@ export function createVoiceRepository() {
           providerSource: "user",
           accountSidPrefix: accountSid.slice(0, 8),
           defaultFromNumber: row.defaultFromNumber ?? undefined,
-          defaultWebhookBaseUrl: row.defaultWebhookBaseUrl ?? undefined,
+          defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
           deleteTwilioRecordingAfterBlobUpload:
             row.deleteTwilioRecordingAfterBlobUpload,
           updatedAt: iso(row.updatedAt),
@@ -385,7 +385,6 @@ export function createVoiceRepository() {
         accountSid: string
         authToken: string
         defaultFromNumber?: string
-        defaultWebhookBaseUrl?: string
         deleteTwilioRecordingAfterBlobUpload?: boolean
       }
     ): Promise<RedactedTwilioConfig> {
@@ -399,7 +398,6 @@ export function createVoiceRepository() {
           encryptedAccountSid: encryptSecret(input.accountSid),
           encryptedAuthToken: encryptSecret(input.authToken),
           defaultFromNumber: input.defaultFromNumber,
-          defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
           deleteTwilioRecordingAfterBlobUpload:
             input.deleteTwilioRecordingAfterBlobUpload ?? false,
           createdAt: updatedAt,
@@ -411,7 +409,6 @@ export function createVoiceRepository() {
             encryptedAccountSid: encryptSecret(input.accountSid),
             encryptedAuthToken: encryptSecret(input.authToken),
             defaultFromNumber: input.defaultFromNumber,
-            defaultWebhookBaseUrl: input.defaultWebhookBaseUrl,
             deleteTwilioRecordingAfterBlobUpload:
               input.deleteTwilioRecordingAfterBlobUpload ?? false,
             updatedAt,
@@ -441,7 +438,7 @@ export function createVoiceRepository() {
           accountSid: decryptSecret(row.encryptedAccountSid),
           authToken: decryptSecret(row.encryptedAuthToken),
           defaultFromNumber: row.defaultFromNumber ?? undefined,
-          defaultWebhookBaseUrl: row.defaultWebhookBaseUrl ?? undefined,
+          defaultWebhookBaseUrl: process.env.TWILIO_WEBHOOK_BASE_URL,
           deleteTwilioRecordingAfterBlobUpload:
             row.deleteTwilioRecordingAfterBlobUpload,
           source: "user",

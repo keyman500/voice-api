@@ -25,7 +25,6 @@ type LiveKitFormValues = {
   accountSid: string
   authToken: string
   defaultFromNumber: string
-  defaultWebhookBaseUrl: string
   deleteTwilioRecordingAfterBlobUpload: boolean
 }
 
@@ -49,7 +48,6 @@ export function LiveKitSettings() {
       accountSid: "",
       authToken: "",
       defaultFromNumber: "",
-      defaultWebhookBaseUrl: "",
       deleteTwilioRecordingAfterBlobUpload: false,
     },
   })
@@ -60,8 +58,6 @@ export function LiveKitSettings() {
         accountSid: values.accountSid.trim(),
         authToken: values.authToken.trim(),
         defaultFromNumber: values.defaultFromNumber.trim() || undefined,
-        defaultWebhookBaseUrl:
-          values.defaultWebhookBaseUrl.trim() || undefined,
         deleteTwilioRecordingAfterBlobUpload:
           values.deleteTwilioRecordingAfterBlobUpload,
       })
@@ -77,7 +73,6 @@ export function LiveKitSettings() {
         accountSid: "",
         authToken: "",
         defaultFromNumber: "",
-        defaultWebhookBaseUrl: "",
         deleteTwilioRecordingAfterBlobUpload:
           configQuery.data?.deleteTwilioRecordingAfterBlobUpload ?? false,
       })
@@ -146,11 +141,6 @@ export function LiveKitSettings() {
             <KeyValue
               label="Default from number"
               value={configQuery.data?.defaultFromNumber ?? "—"}
-              mono
-            />
-            <KeyValue
-              label="Webhook base URL"
-              value={configQuery.data?.defaultWebhookBaseUrl ?? "—"}
               mono
             />
             <KeyValue
@@ -239,7 +229,7 @@ export function LiveKitSettings() {
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="livekit-key">API key</Label>
+                <Label htmlFor="twilio-auth-token">Auth Token</Label>
                 <Controller
                   name="authToken"
                   control={form.control}
@@ -247,7 +237,7 @@ export function LiveKitSettings() {
                   render={({ field, fieldState }) => (
                     <>
                       <Input
-                        id="livekit-key"
+                        id="twilio-auth-token"
                         type="password"
                         placeholder="Twilio auth token"
                         {...field}
@@ -282,14 +272,6 @@ export function LiveKitSettings() {
                   )}
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="webhook-base">Default webhook base URL</Label>
-              <Input
-                id="webhook-base"
-                placeholder="https://your-app.example.com"
-                {...form.register("defaultWebhookBaseUrl")}
-              />
             </div>
             <label
               htmlFor="delete-twilio-recording"

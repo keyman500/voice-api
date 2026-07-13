@@ -4,9 +4,11 @@ const ALGORITHM = "aes-256-gcm"
 const IV_BYTES = 12
 
 function keyFromEnv(): Buffer {
-  const secret = process.env.LIVEKIT_CREDENTIAL_ENCRYPTION_KEY
+  const secret =
+    process.env.CREDENTIAL_ENCRYPTION_KEY ??
+    process.env.LIVEKIT_CREDENTIAL_ENCRYPTION_KEY
   if (!secret) {
-    throw new Error("LIVEKIT_CREDENTIAL_ENCRYPTION_KEY is required")
+    throw new Error("CREDENTIAL_ENCRYPTION_KEY is required")
   }
   return createHash("sha256").update(secret).digest()
 }

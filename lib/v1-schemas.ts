@@ -98,7 +98,6 @@ export const upsertTwilioConfigBody = t.Object({
   accountSid: t.String(),
   authToken: t.String(),
   defaultFromNumber: t.Optional(t.String()),
-  defaultWebhookBaseUrl: t.Optional(t.String()),
   deleteTwilioRecordingAfterBlobUpload: t.Optional(t.Boolean()),
 })
 
