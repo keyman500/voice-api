@@ -30,21 +30,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+function usableErrorMessage(message: unknown): string | null {
+  if (typeof message !== "string") return null
+  const trimmed = message.trim()
+  if (!trimmed || trimmed === "[object Object]") return null
+  return trimmed
+}
+
+function messageFromApiPayload(payload: unknown): string | null {
+  if (!isRecord(payload)) return null
+
+  const nestedError = payload.error
+  if (isRecord(nestedError)) {
+    const nestedMessage = usableErrorMessage(nestedError.message)
+    if (nestedMessage) return nestedMessage
+  }
+
+  return usableErrorMessage(payload.message)
+}
+
 export function getApiErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message
-
   if (isRecord(error)) {
-    const value = error.value
-    if (isRecord(value)) {
-      const nestedError = value.error
-      if (isRecord(nestedError) && typeof nestedError.message === "string") {
-        return nestedError.message
-      }
+    const fromValue = messageFromApiPayload(error.value)
+    if (fromValue) return fromValue
 
-      if (typeof value.message === "string") {
-        return value.message
-      }
-    }
+    const fromTopLevel = messageFromApiPayload(error)
+    if (fromTopLevel) return fromTopLevel
+  }
+
+  if (error instanceof Error) {
+    const fromError = usableErrorMessage(error.message)
+    if (fromError) return fromError
   }
 
   return fallback

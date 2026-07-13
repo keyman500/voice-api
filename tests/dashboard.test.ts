@@ -50,4 +50,23 @@ describe("dashboard helpers", () => {
       )
     ).toBe("LiveKit config missing")
   })
+
+  it("prefers Eden value.error.message over useless Error.message", () => {
+    const edenError = Object.assign(
+      new Error("[object Object]"),
+      {
+        status: 402,
+        value: {
+          error: {
+            code: "BILLING_SUBSCRIPTION_REQUIRED",
+            message: "An active subscription is required to start calls",
+          },
+        },
+      }
+    )
+
+    expect(getApiErrorMessage(edenError, "fallback")).toBe(
+      "An active subscription is required to start calls"
+    )
+  })
 })

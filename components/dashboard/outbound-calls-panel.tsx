@@ -124,6 +124,11 @@ export function OutboundCallsPanel() {
     },
   })
 
+  const callErrorMessage = callMutation.error?.message ?? null
+  const showBillingHint =
+    typeof callErrorMessage === "string" &&
+    /subscription/i.test(callErrorMessage)
+
   return (
     <div className="space-y-8">
       <DashboardPageIntro
@@ -148,7 +153,19 @@ export function OutboundCallsPanel() {
               callMutation.mutate(values)
             )}
           >
-            <InlineError message={callMutation.error?.message ?? null} />
+            <InlineError message={callErrorMessage} />
+            {showBillingHint ? (
+              <p className="text-sm text-muted-foreground">
+                Start or renew a plan on{" "}
+                <Link
+                  href="/dashboard/billing"
+                  className="font-medium text-foreground underline underline-offset-4"
+                >
+                  Billing
+                </Link>{" "}
+                before placing outbound calls.
+              </p>
+            ) : null}
             <InlineError
               message={
                 agentsQuery.error?.message ??
