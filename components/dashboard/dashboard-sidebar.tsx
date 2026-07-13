@@ -12,7 +12,6 @@ import {
   RiFileList3Line,
   RiLayoutGridLine,
   RiLogoutBoxRLine,
-  RiMicLine,
   RiMoonLine,
   RiNumbersLine,
   RiPhoneLine,
@@ -48,6 +47,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PostHogIdentify } from "@/components/dashboard/posthog-identify"
+import { VoiceApiLogoMark } from "@/components/voice-api-logo"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSession, signOut } from "@/lib/auth-client"
 import posthog from "posthog-js"
@@ -171,7 +171,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <RiMicLine className="size-4" />
+                  <VoiceApiLogoMark className="size-5" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span

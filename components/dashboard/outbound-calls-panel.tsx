@@ -128,7 +128,7 @@ export function OutboundCallsPanel() {
     <div className="space-y-8">
       <DashboardPageIntro
         eyebrow="Calls"
-        title="Launch outbound traffic without leaving the control room."
+        title="Launch outbound traffic without leaving the dashboard."
         description="Compose a call, choose the agent explicitly, and select an imported Twilio number as the outbound caller ID."
         action={
           <Button variant="outline" render={<Link href="/dashboard/logs" />}>
