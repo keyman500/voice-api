@@ -5,6 +5,7 @@ import { apiKey } from "@better-auth/api-key"
 import { db } from "./db"
 import { getPolarSdk } from "./polar"
 import * as schema from "./schema"
+import { grantSignupBonus } from "./services/billing"
 
 const polarSdk = getPolarSdk()
 const polarAuthPlugin = polarSdk
@@ -63,6 +64,20 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+  },
+
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user) => {
+          try {
+            await grantSignupBonus(user.id)
+          } catch (error) {
+            console.error("Failed to grant signup bonus credits", error)
+          }
+        },
+      },
+    },
   },
 
   // API key plugin — foundation only (no key-management UX yet).

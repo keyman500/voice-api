@@ -152,28 +152,32 @@ export function BillingWorkspace() {
                 status.active ? (status.plan?.name ?? "Active") : "Inactive"
               }
               caption={
-                status.configured
-                  ? status.active
-                    ? status.plan?.cancelAtPeriodEnd
-                      ? `Cancels ${formatDateTime(status.plan.currentPeriodEnd)}`
-                      : `Status: ${status.plan?.subscriptionStatus ?? "active"}`
-                    : "Choose a plan before starting calls"
-                  : "Polar env vars are not configured"
+                status.active
+                  ? status.plan?.cancelAtPeriodEnd
+                    ? `Cancels ${formatDateTime(status.plan.currentPeriodEnd)}`
+                    : `Status: ${status.plan?.subscriptionStatus ?? "active"}`
+                  : status.credits.balance > 0
+                    ? "Welcome credits available — subscribe anytime"
+                    : status.configured
+                      ? "Choose a plan before starting calls"
+                      : "Polar env vars are not configured"
               }
             />
             <MetricCard
-              label="Included credits"
+              label={status.active ? "Included credits" : "Credits"}
               value={formatCredits(status.credits.credited)}
               caption={
                 status.plan
                   ? `${status.plan.name} monthly allowance`
-                  : "No active credit allowance"
+                  : status.credits.credited > 0
+                    ? "Welcome / trial credits"
+                    : "No active credit allowance"
               }
             />
             <MetricCard
               label="Credits used"
               value={formatCredits(status.credits.used)}
-              caption={`Remaining included: ${formatCredits(status.credits.balance)}`}
+              caption={`Remaining: ${formatCredits(status.credits.balance)}`}
             />
             <MetricCard
               label="Estimated overage"

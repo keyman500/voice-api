@@ -66,6 +66,15 @@ export type VoiceModelPricing = {
 export const VOICE_CREDIT_USD = 0.01
 export const AI_USAGE_MARKUP = 1.5
 export const RUNTIME_CREDITS_PER_STARTED_MINUTE = 1
+export const SIGNUP_BONUS_REASON = "signup_bonus"
+
+/** Temporary launch credits. Set SIGNUP_BONUS_CREDITS=0 once paid billing is live. */
+export function signupBonusCredits() {
+  const raw = process.env.SIGNUP_BONUS_CREDITS?.trim()
+  if (!raw) return 0
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
 
 export const VOICE_MODEL_PRICING: Record<string, VoiceModelPricing> = {
   "deepseek/deepseek-v4-flash": {
@@ -301,6 +310,36 @@ async function creditsUsedSince(userId: string, since?: Date) {
   return Number(result?.credits ?? 0)
 }
 
+async function sumGrantedCredits(userId: string) {
+  const [result] = await db
+    .select({ credits: sum(schema.creditGrants.credits) })
+    .from(schema.creditGrants)
+    .where(eq(schema.creditGrants.userId, userId))
+  return Number(result?.credits ?? 0)
+}
+
+/**
+ * Idempotent local signup bonus. No-op when SIGNUP_BONUS_CREDITS is unset/0.
+ * Unique (userId, reason) prevents duplicate grants.
+ */
+export async function grantSignupBonus(userId: string) {
+  const credits = signupBonusCredits()
+  if (credits <= 0) return null
+  const [row] = await db
+    .insert(schema.creditGrants)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      credits,
+      reason: SIGNUP_BONUS_REASON,
+    })
+    .onConflictDoNothing({
+      target: [schema.creditGrants.userId, schema.creditGrants.reason],
+    })
+    .returning()
+  return row ?? null
+}
+
 function validDate(value: Date | string | undefined) {
   if (!value) return undefined
   const date = value instanceof Date ? value : new Date(value)
@@ -312,19 +351,20 @@ export function createBillingService() {
 
   async function billingStatus(userId: string) {
     const usage = await recentUsage(userId)
+    const localGranted = await sumGrantedCredits(userId)
     if (!polar) {
       const localCreditsUsed = await creditsUsedSince(userId)
+      const credits = reconcileCreditBalance({
+        credited: localGranted,
+        polarConsumed: 0,
+        localConsumed: localCreditsUsed,
+      })
       return {
         configured: false,
         active: false,
         plan: null,
         plans: VOICE_CREDIT_PLANS,
-        credits: {
-          used: localCreditsUsed,
-          credited: 0,
-          balance: 0,
-          estimatedOverageCredits: 0,
-        },
+        credits,
         recentUsage: usage,
       }
     }
@@ -336,7 +376,7 @@ export function createBillingService() {
     const meter =
       state.activeMeters?.find((item) => item.creditedUnits > 0) ??
       state.activeMeters?.[0]
-    const credited =
+    const polarCredited =
       meter?.creditedUnits ??
       (planId ? VOICE_CREDIT_PLANS[planId].includedCredits : 0)
     const localCreditsUsed = await creditsUsedSince(
@@ -344,7 +384,7 @@ export function createBillingService() {
       validDate(subscription?.currentPeriodStart)
     )
     const credits = reconcileCreditBalance({
-      credited,
+      credited: polarCredited + localGranted,
       polarConsumed: meter?.consumedUnits ?? 0,
       localConsumed: localCreditsUsed,
     })
@@ -368,6 +408,7 @@ export function createBillingService() {
 
   return {
     plans: VOICE_CREDIT_PLANS,
+    grantSignupBonus,
 
     modelPricing() {
       return {
@@ -435,18 +476,22 @@ export function createBillingService() {
     },
 
     async assertCanStartCall(userId: string) {
-      if (!polar) polarUnavailable()
-      const state = await polar.customers.getStateExternal({
-        externalId: userId,
-      })
-      if (!activeSubscriptionFromState(state)) {
+      const account = await billingStatus(userId)
+      if (account.active) return true as const
+      if (account.credits.balance > 0) return true as const
+      if (account.credits.credited > 0 || account.credits.used > 0) {
         throw new VoiceServiceError(
           402,
-          "BILLING_SUBSCRIPTION_REQUIRED",
-          "An active subscription is required to start calls"
+          "BILLING_INSUFFICIENT_CREDITS",
+          "Insufficient credits to start calls"
         )
       }
-      return true as const
+      if (!polar) polarUnavailable()
+      throw new VoiceServiceError(
+        402,
+        "BILLING_SUBSCRIPTION_REQUIRED",
+        "An active subscription is required to start calls"
+      )
     },
 
     async checkout(userId: string, plan: VoiceCreditPlanId) {
