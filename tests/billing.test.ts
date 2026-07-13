@@ -298,15 +298,51 @@ describe("signup bonus credits", () => {
 
     const { db } = loadDb()
     const { createBillingService } = loadBilling()
+    // Subscribed path: recent usage list + period usage only (no grant sum)
     mockSelectSequence(db, [
       { kind: "list", value: [] },
-      { kind: "sum", value: [{ credits: "0" }] },
       { kind: "sum", value: [{ credits: "1000" }] },
     ])
 
     await expect(
       createBillingService().assertCanStartCall("user-1")
     ).resolves.toBe(true)
+  })
+
+  it("does not re-credit lifetime signup grants after a subscription period rollover", async () => {
+    process.env.POLAR_STARTER_PRODUCT_ID = "prod_starter"
+    const { getPolarSdk } = loadPolar()
+    getPolarSdk.mockReturnValue({
+      customers: {
+        getStateExternal: jest.fn(async () => ({
+          activeSubscriptions: [
+            {
+              productId: "prod_starter",
+              status: "active",
+              currentPeriodStart: new Date("2026-02-01"),
+            },
+          ],
+          activeMeters: [{ creditedUnits: 1000, consumedUnits: 0 }],
+        })),
+      },
+    })
+
+    const { db } = loadDb()
+    const { createBillingService } = loadBilling()
+    mockSelectSequence(db, [
+      { kind: "list", value: [] },
+      // Period usage only — spent signup credits from last period must not return
+      { kind: "sum", value: [{ credits: "0" }] },
+    ])
+
+    const status = await createBillingService().status("user-1")
+    expect(status.active).toBe(true)
+    expect(status.credits).toEqual({
+      used: 0,
+      credited: 1000,
+      balance: 1000,
+      estimatedOverageCredits: 0,
+    })
   })
 
   it("requires a subscription when Polar is configured and no credits remain", async () => {

@@ -351,8 +351,8 @@ export function createBillingService() {
 
   async function billingStatus(userId: string) {
     const usage = await recentUsage(userId)
-    const localGranted = await sumGrantedCredits(userId)
     if (!polar) {
+      const localGranted = await sumGrantedCredits(userId)
       const localCreditsUsed = await creditsUsedSince(userId)
       const credits = reconcileCreditBalance({
         credited: localGranted,
@@ -379,15 +379,23 @@ export function createBillingService() {
     const polarCredited =
       meter?.creditedUnits ??
       (planId ? VOICE_CREDIT_PLANS[planId].includedCredits : 0)
-    const localCreditsUsed = await creditsUsedSince(
-      userId,
-      validDate(subscription?.currentPeriodStart)
-    )
-    const credits = reconcileCreditBalance({
-      credited: polarCredited + localGranted,
-      polarConsumed: meter?.consumedUnits ?? 0,
-      localConsumed: localCreditsUsed,
-    })
+    // Local signup grants are lifetime; Polar included credits are period-scoped.
+    // Never stack all-time grants onto a period balance or spent grants "refill"
+    // when currentPeriodStart rolls over.
+    const credits = subscription
+      ? reconcileCreditBalance({
+          credited: polarCredited,
+          polarConsumed: meter?.consumedUnits ?? 0,
+          localConsumed: await creditsUsedSince(
+            userId,
+            validDate(subscription.currentPeriodStart)
+          ),
+        })
+      : reconcileCreditBalance({
+          credited: polarCredited + (await sumGrantedCredits(userId)),
+          polarConsumed: meter?.consumedUnits ?? 0,
+          localConsumed: await creditsUsedSince(userId),
+        })
     return {
       configured: true,
       active: Boolean(subscription),
