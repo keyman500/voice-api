@@ -8,6 +8,7 @@ import type {
   JsonCall,
   JsonCallEvent,
   JsonPhoneNumber,
+  JsonTool,
   JsonTranscriptItem,
   LiveKitCredentials,
   PaginatedList,
@@ -23,6 +24,36 @@ type AgentInsert = typeof schema.voiceAgent.$inferInsert
 type CallInsert = typeof schema.voiceCall.$inferInsert
 type PhoneInsert = typeof schema.voicePhoneNumber.$inferInsert
 type TranscriptInsert = typeof schema.voiceTranscriptItem.$inferInsert
+function encodeToolServer(
+  server:
+    | {
+        url: string
+        timeoutSeconds?: number
+        headers?: Record<string, string>
+        secret?: string | null
+      }
+    | null
+    | undefined,
+  previous?: Record<string, unknown> | null
+) {
+  if (server === undefined) return undefined
+  if (server === null) return null
+  const previousSecret =
+    previous && typeof previous.encryptedSecret === "string"
+      ? previous.encryptedSecret
+      : null
+  let encryptedSecret = previousSecret
+  if (server.secret === null) encryptedSecret = null
+  else if (typeof server.secret === "string" && server.secret.length > 0) {
+    encryptedSecret = encryptSecret(server.secret)
+  }
+  return {
+    url: server.url,
+    timeoutSeconds: server.timeoutSeconds,
+    headers: server.headers,
+    encryptedSecret,
+  }
+}
 
 function now() {
   return new Date()
@@ -85,12 +116,51 @@ function toAgent(row: typeof schema.voiceAgent.$inferSelect): JsonAgent {
     name: row.name ?? undefined,
     voice: (row.voice as JsonAgent["voice"]) ?? undefined,
     model: (row.model as JsonAgent["model"]) ?? undefined,
+    toolIds: Array.isArray(row.toolIds) ? row.toolIds : undefined,
     firstMessage: row.firstMessage ?? undefined,
     maxDurationSeconds: row.maxDurationSeconds ?? undefined,
     successEvaluationPrompt: row.successEvaluationPrompt ?? undefined,
     webhookUrl: row.webhookUrl ?? undefined,
     webhookTimeoutSeconds: row.webhookTimeoutSeconds ?? undefined,
     webhookSecretConfigured: Boolean(row.encryptedWebhookSecret),
+    metadata: row.metadata ?? undefined,
+    providerOptions: row.providerOptions ?? undefined,
+    raw: row.raw ?? {},
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  }
+}
+
+function toTool(row: typeof schema.voiceTool.$inferSelect): JsonTool {
+  const server = (row.server as Record<string, unknown> | null) ?? null
+  const secretConfigured = Boolean(
+    server && typeof server.encryptedSecret === "string"
+  )
+  const publicServer = server
+    ? {
+        url: String(server.url ?? ""),
+        timeoutSeconds:
+          typeof server.timeoutSeconds === "number"
+            ? server.timeoutSeconds
+            : undefined,
+        headers:
+          server.headers && typeof server.headers === "object"
+            ? (server.headers as Record<string, string>)
+            : undefined,
+        secretConfigured,
+      }
+    : undefined
+
+  return {
+    id: row.id,
+    provider: VOICE_API_PROVIDER_ID,
+    type: row.type,
+    name: row.name ?? undefined,
+    description: row.description ?? undefined,
+    function: (row.function as JsonTool["function"]) ?? undefined,
+    server: publicServer?.url ? publicServer : undefined,
+    messages: (row.messages as JsonTool["messages"]) ?? undefined,
+    async: row.isAsync,
     metadata: row.metadata ?? undefined,
     providerOptions: row.providerOptions ?? undefined,
     raw: row.raw ?? {},
@@ -564,6 +634,173 @@ export function createVoiceRepository() {
           )
         )
         .returning({ id: schema.voiceAgent.id })
+      return rows.length > 0
+    },
+
+    async createTool(
+      userId: string,
+      input: {
+        type: string
+        name?: string
+        description?: string
+        function?: JsonTool["function"] | null
+        server?: {
+          url: string
+          timeoutSeconds?: number
+          headers?: Record<string, string>
+          secret?: string
+        } | null
+        messages?: Array<Record<string, unknown>> | null
+        isAsync?: boolean
+        metadata?: Record<string, unknown> | null
+        providerOptions?: Record<string, unknown> | null
+        raw?: Record<string, unknown> | null
+      }
+    ): Promise<JsonTool> {
+      const [row] = await db
+        .insert(schema.voiceTool)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          type: input.type,
+          name: input.name,
+          description: input.description,
+          function: input.function ?? null,
+          server: encodeToolServer(input.server) ?? null,
+          messages: input.messages ?? null,
+          isAsync: input.isAsync ?? false,
+          metadata: input.metadata ?? null,
+          providerOptions: input.providerOptions ?? null,
+          raw: input.raw ?? {},
+          createdAt: now(),
+          updatedAt: now(),
+        })
+        .returning()
+      return toTool(row)
+    },
+
+    async listTools(
+      userId: string,
+      q: { limit?: number; cursor?: string }
+    ): Promise<PaginatedList<JsonTool>> {
+      const rows = await db
+        .select()
+        .from(schema.voiceTool)
+        .where(eq(schema.voiceTool.userId, userId))
+      return takePage(
+        rows.map(toTool).sort((a, b) => a.id.localeCompare(b.id)),
+        limitOf(q.limit),
+        q.cursor
+      )
+    },
+
+    async getTool(userId: string, id: string): Promise<JsonTool | null> {
+      const [row] = await db
+        .select()
+        .from(schema.voiceTool)
+        .where(
+          and(eq(schema.voiceTool.userId, userId), eq(schema.voiceTool.id, id))
+        )
+        .limit(1)
+      return row ? toTool(row) : null
+    },
+
+    async getToolsByIds(userId: string, ids: string[]): Promise<JsonTool[]> {
+      if (ids.length === 0) return []
+      const unique = Array.from(new Set(ids))
+      const rows = await db
+        .select()
+        .from(schema.voiceTool)
+        .where(eq(schema.voiceTool.userId, userId))
+      const byId = new Map(rows.map((row) => [row.id, toTool(row)]))
+      return unique
+        .map((id) => byId.get(id))
+        .filter((tool): tool is JsonTool => Boolean(tool))
+    },
+
+    async updateTool(
+      userId: string,
+      id: string,
+      input: {
+        type?: string
+        name?: string
+        description?: string
+        function?: JsonTool["function"] | null
+        server?: {
+          url: string
+          timeoutSeconds?: number
+          headers?: Record<string, string>
+          secret?: string | null
+        } | null
+        messages?: Array<Record<string, unknown>> | null
+        isAsync?: boolean
+        metadata?: Record<string, unknown> | null
+        providerOptions?: Record<string, unknown> | null
+        raw?: Record<string, unknown> | null
+      }
+    ): Promise<JsonTool | null> {
+      const [current] = await db
+        .select()
+        .from(schema.voiceTool)
+        .where(
+          and(eq(schema.voiceTool.userId, userId), eq(schema.voiceTool.id, id))
+        )
+        .limit(1)
+      if (!current) return null
+
+      const rows = await db
+        .update(schema.voiceTool)
+        .set(
+          cleanUpdate({
+            type: input.type,
+            name: input.name,
+            description: input.description,
+            function: input.function,
+            server: encodeToolServer(
+              input.server,
+              (current.server as Record<string, unknown> | null) ?? null
+            ),
+            messages: input.messages,
+            isAsync: input.isAsync,
+            metadata: input.metadata,
+            providerOptions: input.providerOptions,
+            raw: input.raw,
+            updatedAt: now(),
+          })
+        )
+        .where(
+          and(eq(schema.voiceTool.userId, userId), eq(schema.voiceTool.id, id))
+        )
+        .returning()
+      return rows[0] ? toTool(rows[0]) : null
+    },
+
+    async resolveToolServerSecret(userId: string, toolId: string) {
+      const [row] = await db
+        .select({ server: schema.voiceTool.server })
+        .from(schema.voiceTool)
+        .where(
+          and(
+            eq(schema.voiceTool.userId, userId),
+            eq(schema.voiceTool.id, toolId)
+          )
+        )
+        .limit(1)
+      const server = (row?.server as Record<string, unknown> | null) ?? null
+      const encrypted =
+        server && typeof server.encryptedSecret === "string"
+          ? server.encryptedSecret
+          : null
+      return encrypted ? decryptSecret(encrypted) : null
+    },
+
+    async deleteTool(userId: string, id: string): Promise<boolean> {
+      const rows = await db
+        .delete(schema.voiceTool)
+        .where(
+          and(eq(schema.voiceTool.userId, userId), eq(schema.voiceTool.id, id))
+        )
+        .returning({ id: schema.voiceTool.id })
       return rows.length > 0
     },
 

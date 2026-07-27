@@ -51,6 +51,7 @@ function handle(path: string, init?: RequestInit) {
 function createMockRelayService() {
   let twilioConfigured = false
   const agents = new Map<string, Record<string, unknown>>()
+  const tools = new Map<string, Record<string, unknown>>()
   const calls = new Map<string, Record<string, unknown>>()
   const phoneNumbers = new Map<string, Record<string, unknown>>()
 
@@ -107,6 +108,7 @@ function createMockRelayService() {
           id: "agent-1",
           provider: VOICE_API_PROVIDER_ID,
           name: input.name,
+          toolIds: input.toolIds,
           successEvaluationPrompt: input.successEvaluationPrompt,
           webhookUrl: input.webhookUrl,
           webhookTimeoutSeconds: input.webhookTimeoutSeconds,
@@ -128,6 +130,74 @@ function createMockRelayService() {
     ),
     deleteAgent: jest.fn(async (_userId: string, id: string) =>
       agents.delete(id)
+    ),
+    listTools: jest.fn(async () => ({
+      items: Array.from(tools.values()),
+      hasMore: false,
+    })),
+    getTool: jest.fn(
+      async (_userId: string, id: string) => tools.get(id) ?? null
+    ),
+    createTool: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => {
+        const tool = {
+          id: "tool-1",
+          provider: VOICE_API_PROVIDER_ID,
+          type: input.type,
+          name: input.name,
+          description: input.description,
+          function: input.function,
+          server: input.server
+            ? {
+                ...(input.server as Record<string, unknown>),
+                secretConfigured: Boolean(
+                  (input.server as Record<string, unknown>).secret
+                ),
+              }
+            : undefined,
+          messages: input.messages,
+          async: input.async ?? false,
+          raw: {},
+        }
+        if (tool.server && "secret" in tool.server) {
+          delete (tool.server as Record<string, unknown>).secret
+        }
+        tools.set(tool.id, tool)
+        return tool
+      }
+    ),
+    updateTool: jest.fn(
+      async (_userId: string, id: string, input: Record<string, unknown>) => {
+        const current = tools.get(id)
+        if (!current) return null
+        const next = { ...current, ...input }
+        tools.set(id, next)
+        return next
+      }
+    ),
+    deleteTool: jest.fn(async (_userId: string, id: string) =>
+      tools.delete(id)
+    ),
+    testTool: jest.fn(
+      async (_userId: string, id: string, input: Record<string, unknown>) => {
+        const tool = tools.get(id)
+        if (!tool) {
+          throw new VoiceServiceError(404, "TOOL_NOT_FOUND", "Tool not found")
+        }
+        return {
+          toolCallId: "test_1",
+          name:
+            (tool.function as { name?: string } | undefined)?.name ??
+            tool.name ??
+            "tool",
+          result: JSON.stringify({
+            ok: true,
+            arguments: input.arguments ?? {},
+          }),
+          ok: true,
+          status: 200,
+        }
+      }
     ),
     listCalls: jest.fn(async () => ({
       items: Array.from(calls.values()),
@@ -513,6 +583,87 @@ describe("/api/v1 relay routes", () => {
       webhookSecretConfigured: true,
     })
     expect(JSON.stringify(body)).not.toContain("secret-token")
+  })
+
+  it("POST /api/v1/tools creates a function tool and redacts server secret", async () => {
+    const res = await handle("/api/v1/tools", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "function",
+        name: "Weather Lookup",
+        description: "Look up weather",
+        function: {
+          name: "get_weather",
+          description: "Get weather for a location",
+          parameters: {
+            type: "object",
+            properties: { location: { type: "string" } },
+            required: ["location"],
+          },
+        },
+        server: {
+          url: "https://example.com/tools/weather",
+          timeoutSeconds: 8,
+          secret: "tool-secret",
+        },
+        messages: [
+          { type: "request-start", content: "Checking the weather now." },
+        ],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({
+      id: "tool-1",
+      type: "function",
+      name: "Weather Lookup",
+      function: { name: "get_weather" },
+      server: {
+        url: "https://example.com/tools/weather",
+        secretConfigured: true,
+      },
+    })
+    expect(JSON.stringify(body)).not.toContain("tool-secret")
+  })
+
+  it("POST /api/v1/tools/:id/test invokes the tool without a phone call", async () => {
+    await handle("/api/v1/tools", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "function",
+        name: "lookup",
+        function: { name: "lookup_account" },
+        server: { url: "https://example.com/tools/lookup" },
+      }),
+    })
+
+    const res = await handle("/api/v1/tools/tool-1/test", {
+      method: "POST",
+      body: JSON.stringify({ arguments: { query: "acme" } }),
+    })
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      name: "lookup_account",
+      result: expect.stringContaining("acme"),
+    })
+  })
+
+  it("POST /api/v1/agents accepts toolIds", async () => {
+    const res = await handle("/api/v1/agents", {
+      method: "POST",
+      body: JSON.stringify({
+        voiceEngine: "conversation-relay",
+        name: "Tool Agent",
+        toolIds: ["tool-1", "tool-2"],
+      }),
+    })
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      name: "Tool Agent",
+      toolIds: ["tool-1", "tool-2"],
+    })
   })
 
   it("requires an explicit voice engine for new agents", async () => {

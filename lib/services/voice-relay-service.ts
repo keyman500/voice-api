@@ -19,9 +19,11 @@ import type {
   JsonAgent,
   JsonCall,
   JsonPhoneNumber,
+  JsonTool,
   PaginatedList,
   RedactedTwilioConfig,
 } from "./voice-types"
+import { executeToolCall } from "./tool-executor"
 import {
   REALTIME_MAX_DURATION_SECONDS,
   realtimeModel,
@@ -69,6 +71,75 @@ function intFrom(value: unknown) {
     return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
+}
+
+function validateToolInput(input: {
+  type: string
+  name?: string
+  function?: JsonTool["function"]
+  server?: { url?: string } | null
+}) {
+  if (input.type !== "function") {
+    throw new VoiceServiceError(
+      400,
+      "UNSUPPORTED_TOOL_TYPE",
+      `Unsupported tool type "${input.type}". Only type "function" is supported.`
+    )
+  }
+  const functionName = input.function?.name ?? input.name
+  if (!functionName || functionName.trim().length === 0) {
+    throw new VoiceServiceError(
+      400,
+      "TOOL_FUNCTION_NAME_REQUIRED",
+      "function.name (or name) is required for function tools"
+    )
+  }
+  if (input.server && !stringValue(input.server.url)) {
+    throw new VoiceServiceError(
+      400,
+      "TOOL_SERVER_URL_REQUIRED",
+      "server.url is required when server is provided"
+    )
+  }
+}
+
+function normalizeToolFunction(input: {
+  type: string
+  name?: string
+  description?: string
+  function?: JsonTool["function"]
+}): JsonTool["function"] {
+  const name = input.function?.name ?? input.name
+  if (!name) {
+    throw new VoiceServiceError(
+      400,
+      "TOOL_FUNCTION_NAME_REQUIRED",
+      "function.name is required for function tools"
+    )
+  }
+  return {
+    name,
+    description: input.function?.description ?? input.description,
+    parameters: input.function?.parameters ?? {
+      type: "object",
+      properties: {},
+    },
+  }
+}
+
+async function assertOwnedToolIds(
+  repository: VoiceRepository,
+  userId: string,
+  toolIds: string[]
+) {
+  const tools = await repository.getToolsByIds(userId, toolIds)
+  if (tools.length !== new Set(toolIds).size) {
+    throw new VoiceServiceError(
+      400,
+      "TOOL_IDS_INVALID",
+      "One or more toolIds do not exist for this account"
+    )
+  }
 }
 
 function validateAgentEngine(input: {
@@ -393,6 +464,7 @@ export function createVoiceRelayService(
         name?: string
         voice?: JsonAgent["voice"]
         model?: JsonAgent["model"]
+        toolIds?: string[]
         firstMessage?: string
         maxDurationSeconds?: number
         backgroundSound?: string
@@ -406,11 +478,15 @@ export function createVoiceRelayService(
       }
     ) {
       validateAgentEngine(input)
+      if (input.toolIds?.length) {
+        await assertOwnedToolIds(repo, userId, input.toolIds)
+      }
       return repo.createAgent(userId, {
         voiceEngine: input.voiceEngine,
         name: input.name,
         voice: input.voice ?? null,
         model: input.model ?? null,
+        toolIds: input.toolIds ?? null,
         firstMessage: input.firstMessage,
         maxDurationSeconds:
           input.voiceEngine === "realtime"
@@ -436,6 +512,7 @@ export function createVoiceRelayService(
         name?: string
         voice?: JsonAgent["voice"]
         model?: JsonAgent["model"]
+        toolIds?: string[]
         firstMessage?: string
         maxDurationSeconds?: number
         backgroundSound?: string
@@ -456,11 +533,15 @@ export function createVoiceRelayService(
         voice: input.voice ?? current.voice,
         maxDurationSeconds: input.maxDurationSeconds,
       })
+      if (input.toolIds) {
+        await assertOwnedToolIds(repo, userId, input.toolIds)
+      }
       return repo.updateAgent(userId, id, {
         voiceEngine: input.voiceEngine,
         name: input.name,
         voice: input.voice ?? undefined,
         model: input.model ?? undefined,
+        toolIds: input.toolIds,
         firstMessage: input.firstMessage,
         maxDurationSeconds: input.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
@@ -476,6 +557,155 @@ export function createVoiceRelayService(
 
     async deleteAgent(userId: string, id: string) {
       return repo.deleteAgent(userId, id)
+    },
+
+    async listTools(
+      userId: string,
+      q: { limit?: number; cursor?: string }
+    ): Promise<PaginatedList<JsonTool>> {
+      return repo.listTools(userId, q)
+    },
+
+    async getTool(userId: string, id: string) {
+      return repo.getTool(userId, id)
+    },
+
+    async createTool(
+      userId: string,
+      input: {
+        type: string
+        name?: string
+        description?: string
+        function?: JsonTool["function"]
+        server?: {
+          url: string
+          timeoutSeconds?: number
+          headers?: Record<string, string>
+          secret?: string
+        }
+        messages?: Array<Record<string, unknown>>
+        async?: boolean
+        metadata?: RecordInput
+        providerOptions?: RecordInput
+      }
+    ) {
+      validateToolInput(input)
+      return repo.createTool(userId, {
+        type: input.type,
+        name: input.name ?? input.function?.name,
+        description: input.description ?? input.function?.description,
+        function: normalizeToolFunction(input),
+        server: input.server ?? null,
+        messages: input.messages ?? null,
+        isAsync: input.async ?? false,
+        metadata: input.metadata ?? null,
+        providerOptions: input.providerOptions ?? null,
+        raw: {},
+      })
+    },
+
+    async updateTool(
+      userId: string,
+      id: string,
+      input: {
+        type?: string
+        name?: string
+        description?: string
+        function?: JsonTool["function"]
+        server?: {
+          url: string
+          timeoutSeconds?: number
+          headers?: Record<string, string>
+          secret?: string | null
+        } | null
+        messages?: Array<Record<string, unknown>>
+        async?: boolean
+        metadata?: RecordInput
+        providerOptions?: RecordInput
+      }
+    ) {
+      const current = await repo.getTool(userId, id)
+      if (!current) return null
+      validateToolInput({
+        type: input.type ?? current.type,
+        name: input.name ?? current.name,
+        function: input.function ?? current.function,
+        server:
+          input.server === undefined
+            ? current.server
+              ? { url: current.server.url }
+              : undefined
+            : (input.server ?? undefined),
+      })
+      const shouldNormalizeFunction =
+        input.function !== undefined ||
+        input.name !== undefined ||
+        input.description !== undefined
+      return repo.updateTool(userId, id, {
+        type: input.type,
+        name: input.name,
+        description: input.description,
+        function: shouldNormalizeFunction
+          ? normalizeToolFunction({
+              type: input.type ?? current.type,
+              name: input.name ?? current.name,
+              description: input.description ?? current.description,
+              function: input.function ?? current.function,
+            })
+          : undefined,
+        server: input.server,
+        messages: input.messages,
+        isAsync: input.async,
+        metadata: input.metadata,
+        providerOptions: input.providerOptions,
+      })
+    },
+
+    async deleteTool(userId: string, id: string) {
+      return repo.deleteTool(userId, id)
+    },
+
+    async testTool(
+      userId: string,
+      id: string,
+      input: {
+        arguments?: Record<string, unknown>
+        callId?: string
+      } = {}
+    ) {
+      const tool = await repo.getTool(userId, id)
+      if (!tool) {
+        throw new VoiceServiceError(404, "TOOL_NOT_FOUND", "Tool not found")
+      }
+      if (!tool.server?.url) {
+        throw new VoiceServiceError(
+          400,
+          "TOOL_SERVER_URL_MISSING",
+          "Tool server.url is required before testing"
+        )
+      }
+      const secret = await repo.resolveToolServerSecret(userId, id)
+      const toolCallId = `test_${crypto.randomUUID()}`
+      return executeToolCall({
+        tool: {
+          ...tool,
+          server: {
+            ...tool.server,
+            secret: secret ?? undefined,
+          },
+        },
+        call: {
+          id: input.callId ?? `test-call-${crypto.randomUUID()}`,
+          agentId: undefined,
+          status: "in-progress",
+          direction: "outbound",
+        },
+        toolCall: {
+          id: toolCallId,
+          name: tool.function?.name ?? tool.name ?? "tool",
+          arguments: input.arguments ?? {},
+        },
+      })
     },
 
     async listCalls(
@@ -2035,6 +2265,10 @@ export function createVoiceRelayService(
             })),
             { role: "user" as const, content: text },
           ]
+          const attachedTools =
+            agent.toolIds && agent.toolIds.length > 0
+              ? await repo.getToolsByIds(input.userId, agent.toolIds)
+              : []
           let assistantText = ""
           let llmResponse: LlmStreamResponse
           try {
@@ -2043,6 +2277,79 @@ export function createVoiceRelayService(
               callId: input.callId,
               messages,
               signal: controller.signal,
+              toolsContext:
+                attachedTools.length > 0
+                  ? {
+                      tools: attachedTools,
+                      call: {
+                        id: input.callId,
+                        agentId: call.agentId,
+                        toNumber: call.toNumber,
+                        fromNumber: call.fromNumber,
+                        status: call.status,
+                        direction: call.direction,
+                      },
+                      resolveToolSecret: (toolId) =>
+                        repo.resolveToolServerSecret(input.userId, toolId),
+                      onToolEvent: async (event) => {
+                        if (event.phase === "start" && event.speak) {
+                          input.send?.({
+                            type: "text",
+                            token: event.speak,
+                            last: false,
+                            interruptible: true,
+                          })
+                          assistantText +=
+                            (assistantText && !assistantText.endsWith(" ")
+                              ? " "
+                              : "") + event.speak
+                        }
+                        if (event.phase === "complete") {
+                          await repo.addCallEvent(
+                            input.userId,
+                            input.callId,
+                            event.result.ok
+                              ? "tool.call.completed"
+                              : "tool.call.failed",
+                            {
+                              toolCallId: event.toolCallId,
+                              name: event.name,
+                              arguments: event.arguments,
+                              result: event.result.result,
+                              status: event.result.status,
+                              error: event.result.error,
+                            }
+                          )
+                          const toolItems = await repo.listTranscriptItems(
+                            input.userId,
+                            input.callId
+                          )
+                          await repo.addTranscriptItem(input.userId, {
+                            callId: input.callId,
+                            role: "tool",
+                            text: `${event.name}: ${event.result.result}`,
+                            status: "final",
+                            sequence: toolItems.length + 1,
+                            raw: {
+                              toolCallId: event.toolCallId,
+                              name: event.name,
+                              arguments: event.arguments,
+                              ok: event.result.ok,
+                            },
+                          })
+                          if (event.speak) {
+                            input.send?.({
+                              type: "text",
+                              token: ` ${event.speak}`,
+                              last: false,
+                              interruptible: true,
+                            })
+                            assistantText += ` ${event.speak}`
+                          }
+                        }
+                      },
+                    }
+                  : undefined,
             })
             for await (const token of llmResponse.textStream) {
               assistantText += token

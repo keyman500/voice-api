@@ -6,7 +6,8 @@ Voice API is **source-available** under the [Voice API License](./LICENSE.md). Y
 
 ## Features
 
-- **REST-first API** — agents, calls, call logs, recordings, phone numbers, and Twilio configuration under `/api/v1/*`
+- **REST-first API** — agents, tools, calls, call logs, recordings, phone numbers, and Twilio configuration under `/api/v1/*`
+- **Vapi-style tool calls** — attach reusable function tools with server URLs; ConversationRelay POSTs `tool-calls` payloads mid-call
 - **Twilio ConversationRelay** — real-time voice relay with WebSocket support for local development
 - **LiveKit integration** — optional SIP outbound and room-based voice workflows
 - **Typed SDK compatibility** — response shapes aligned with [`keyman500/voice-ai-sdk`](https://github.com/keyman500/voice-ai-sdk)

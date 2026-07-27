@@ -24,11 +24,29 @@ export const voiceEngine = t.Union([
 /** Loose JSON object for metadata / passthrough. */
 export const recordUnknown = t.Record(t.String(), t.Unknown())
 
+export const toolFunctionConfig = t.Object({
+  name: t.String(),
+  description: t.Optional(t.String()),
+  parameters: t.Optional(recordUnknown),
+})
+
+export const toolServerConfig = t.Object({
+  url: t.String(),
+  timeoutSeconds: t.Optional(t.Number()),
+  headers: t.Optional(t.Record(t.String(), t.String())),
+  secret: t.Optional(t.String()),
+})
+
 const optionalRecordUnknown = t.Optional(recordUnknown)
 const nullableString = t.Union([t.String(), t.Null(), t.Undefined()])
 const nullableNumber = t.Union([t.Number(), t.Null(), t.Undefined()])
 const nullableBoolean = t.Union([t.Boolean(), t.Null(), t.Undefined()])
 const nullableRecordUnknown = t.Union([recordUnknown, t.Null(), t.Undefined()])
+const nullableStringArray = t.Union([
+  t.Array(t.String()),
+  t.Null(),
+  t.Undefined(),
+])
 
 export const errorResponse = t.Object({
   error: t.Object({
@@ -53,6 +71,7 @@ export const createAgentBody = t.Object({
   name: t.Optional(t.String()),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
+  toolIds: t.Optional(t.Array(t.String())),
   firstMessage: t.Optional(t.String()),
   maxDurationSeconds: t.Optional(t.Number()),
   backgroundSound: t.Optional(t.String()),
@@ -70,6 +89,7 @@ export const updateAgentBody = t.Object({
   name: t.Optional(t.String()),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
+  toolIds: t.Optional(t.Array(t.String())),
   firstMessage: t.Optional(t.String()),
   maxDurationSeconds: t.Optional(t.Number()),
   backgroundSound: t.Optional(t.String()),
@@ -80,6 +100,40 @@ export const updateAgentBody = t.Object({
   webhookSecret: t.Optional(t.String()),
   metadata: optionalRecordUnknown,
   providerOptions: optionalRecordUnknown,
+})
+
+export const createToolBody = t.Object({
+  type: t.String(),
+  name: t.Optional(t.String()),
+  description: t.Optional(t.String()),
+  function: t.Optional(toolFunctionConfig),
+  server: t.Optional(toolServerConfig),
+  messages: t.Optional(t.Array(recordUnknown)),
+  async: t.Optional(t.Boolean()),
+  metadata: optionalRecordUnknown,
+  providerOptions: optionalRecordUnknown,
+})
+
+export const updateToolBody = t.Object({
+  type: t.Optional(t.String()),
+  name: t.Optional(t.String()),
+  description: t.Optional(t.String()),
+  function: t.Optional(toolFunctionConfig),
+  server: t.Optional(toolServerConfig),
+  messages: t.Optional(t.Array(recordUnknown)),
+  async: t.Optional(t.Boolean()),
+  metadata: optionalRecordUnknown,
+  providerOptions: optionalRecordUnknown,
+})
+
+export const listToolsQuery = t.Object({
+  limit: t.Optional(t.Numeric()),
+  cursor: t.Optional(t.String()),
+})
+
+export const testToolBody = t.Object({
+  arguments: t.Optional(recordUnknown),
+  callId: t.Optional(t.String()),
 })
 
 export const listAgentsQuery = t.Object({
@@ -186,6 +240,7 @@ export const agentResponse = t.Object({
   name: t.Optional(nullableString),
   voice: t.Optional(voiceConfig),
   model: t.Optional(modelConfig),
+  toolIds: t.Optional(nullableStringArray),
   firstMessage: t.Optional(nullableString),
   maxDurationSeconds: t.Optional(nullableNumber),
   successEvaluationPrompt: t.Optional(nullableString),
@@ -203,6 +258,51 @@ export const agentListResponse = t.Object({
   items: t.Array(agentResponse),
   hasMore: t.Boolean(),
   nextCursor: t.Optional(t.String()),
+})
+
+export const toolResponse = t.Object({
+  id: t.String(),
+  provider: t.String(),
+  type: t.String(),
+  name: t.Optional(nullableString),
+  description: t.Optional(nullableString),
+  function: t.Optional(
+    t.Object({
+      name: t.String(),
+      description: t.Optional(nullableString),
+      parameters: t.Optional(nullableRecordUnknown),
+    })
+  ),
+  server: t.Optional(
+    t.Object({
+      url: t.String(),
+      timeoutSeconds: t.Optional(nullableNumber),
+      headers: t.Optional(t.Record(t.String(), t.String())),
+      secretConfigured: t.Optional(t.Boolean()),
+    })
+  ),
+  messages: t.Optional(t.Union([t.Array(recordUnknown), t.Null(), t.Undefined()])),
+  async: t.Optional(t.Boolean()),
+  metadata: t.Optional(nullableRecordUnknown),
+  providerOptions: t.Optional(nullableRecordUnknown),
+  raw: t.Unknown(),
+  createdAt: t.Optional(t.String()),
+  updatedAt: t.Optional(t.String()),
+})
+
+export const toolListResponse = t.Object({
+  items: t.Array(toolResponse),
+  hasMore: t.Boolean(),
+  nextCursor: t.Optional(t.String()),
+})
+
+export const toolTestResponse = t.Object({
+  toolCallId: t.String(),
+  name: t.String(),
+  result: t.String(),
+  ok: t.Boolean(),
+  status: t.Optional(nullableNumber),
+  error: t.Optional(nullableString),
 })
 
 export const callResponse = t.Object({
