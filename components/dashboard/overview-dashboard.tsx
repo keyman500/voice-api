@@ -39,6 +39,14 @@ async function fetchOverviewLiveKit() {
   return data as LiveKitConfigResponse
 }
 
+async function fetchOverviewTelnyx() {
+  const { data, error } = await api.v1["telnyx-config"].get()
+  if (error) {
+    throw new Error(getApiErrorMessage(error, "Failed to load Telnyx config"))
+  }
+  return data as import("@/lib/dashboard").TelnyxConfigResponse
+}
+
 async function fetchOverviewAgents() {
   const { data, error } = await api.v1.agents.get({ query: { limit: 5 } })
   if (error) {
@@ -61,6 +69,11 @@ export function OverviewDashboard() {
     queryFn: fetchOverviewLiveKit,
   })
 
+  const telnyxQuery = useQuery({
+    queryKey: dashboardQueryKeys.telnyx(),
+    queryFn: fetchOverviewTelnyx,
+  })
+
   const agentsQuery = useQuery({
     queryKey: dashboardQueryKeys.agents(5),
     queryFn: fetchOverviewAgents,
@@ -73,6 +86,7 @@ export function OverviewDashboard() {
 
   const errorMessage =
     livekitQuery.error?.message ??
+    telnyxQuery.error?.message ??
     agentsQuery.error?.message ??
     callsQuery.error?.message
 
@@ -92,7 +106,7 @@ export function OverviewDashboard() {
               variant="outline"
               render={<Link href="/dashboard/settings" />}
             >
-              Twilio settings
+              Telephony settings
               <RiSettings3Line />
             </Button>
           </div>
@@ -100,6 +114,7 @@ export function OverviewDashboard() {
       />
 
       {livekitQuery.isPending ||
+      telnyxQuery.isPending ||
       agentsQuery.isPending ||
       callsQuery.isPending ? (
         <PanelSkeleton />
@@ -114,7 +129,16 @@ export function OverviewDashboard() {
           caption={
             livekitQuery.data?.configured
               ? `${livekitQuery.data.providerSource} credentials configured`
-              : "Set credentials before launching outbound calls"
+              : "Optional — configure Twilio or Telnyx"
+          }
+        />
+        <MetricCard
+          label="Telnyx"
+          value={telnyxQuery.data?.configured ? "Ready" : "Offline"}
+          caption={
+            telnyxQuery.data?.configured
+              ? `${telnyxQuery.data.providerSource} credentials configured`
+              : "Optional — configure Telnyx or Twilio"
           }
         />
         <MetricCard
@@ -126,15 +150,6 @@ export function OverviewDashboard() {
           label="Recent calls"
           value={callsQuery.data?.items.length ?? 0}
           caption="Latest outbound sessions loaded into the operator feed"
-        />
-        <MetricCard
-          label="Last config update"
-          value={
-            livekitQuery.data?.updatedAt
-              ? formatDateTime(livekitQuery.data.updatedAt)
-              : "—"
-          }
-          caption="Redacted config status from /api/v1/twilio-config"
         />
       </div>
 

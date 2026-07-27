@@ -121,11 +121,18 @@ export function PhoneNumbersWorkspace() {
   }, [forms, numbers])
 
   const importMutation = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await api.v1["phone-numbers"].import.post()
+    mutationFn: async (telephonyProvider: "twilio" | "telnyx" = "twilio") => {
+      const { data, error } = await api.v1["phone-numbers"].import.post({
+        telephonyProvider,
+      })
       if (error) {
         throw new Error(
-          getApiErrorMessage(error, "Failed to import Twilio numbers")
+          getApiErrorMessage(
+            error,
+            telephonyProvider === "telnyx"
+              ? "Failed to import Telnyx numbers"
+              : "Failed to import Twilio numbers"
+          )
         )
       }
       return data
@@ -195,17 +202,34 @@ export function PhoneNumbersWorkspace() {
     <div className="space-y-8">
       <DashboardPageIntro
         eyebrow="Numbers"
-        title="Import Twilio numbers and route inbound calls."
-        description="Sync owned Twilio numbers, attach an inbound agent, and use those numbers as caller IDs for outbound calls."
+        title="Import Twilio or Telnyx numbers and route inbound calls."
+        description="Sync owned Twilio or Telnyx numbers, attach an inbound agent, and use those numbers as caller IDs for outbound calls."
         action={
-          <Button
-            type="button"
-            onClick={() => importMutation.mutate()}
-            disabled={importMutation.isPending}
-          >
-            <RiDownloadCloud2Line />
-            {importMutation.isPending ? "Importing..." : "Import from Twilio"}
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              onClick={() => importMutation.mutate("twilio")}
+              disabled={importMutation.isPending}
+            >
+              <RiDownloadCloud2Line />
+              {importMutation.isPending &&
+              importMutation.variables === "twilio"
+                ? "Importing..."
+                : "Import from Twilio"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => importMutation.mutate("telnyx")}
+              disabled={importMutation.isPending}
+            >
+              <RiDownloadCloud2Line />
+              {importMutation.isPending &&
+              importMutation.variables === "telnyx"
+                ? "Importing..."
+                : "Import from Telnyx"}
+            </Button>
+          </div>
         }
       />
 
