@@ -101,6 +101,24 @@ export const upsertTwilioConfigBody = t.Object({
   deleteTwilioRecordingAfterBlobUpload: t.Optional(t.Boolean()),
 })
 
+export const upsertTelnyxConfigBody = t.Object({
+  apiKey: t.String(),
+  publicKey: t.Optional(t.String()),
+  accountSid: t.String(),
+  applicationSid: t.String(),
+  defaultFromNumber: t.Optional(t.String()),
+  deleteTelnyxRecordingAfterBlobUpload: t.Optional(t.Boolean()),
+})
+
+export const telephonyProvider = t.Union([
+  t.Literal("twilio"),
+  t.Literal("telnyx"),
+])
+
+export const importPhoneNumbersBody = t.Object({
+  telephonyProvider: t.Optional(telephonyProvider),
+})
+
 export const callStatus = t.Union([
   t.Literal("queued"),
   t.Literal("ringing"),
@@ -312,6 +330,9 @@ export const callResponse = t.Object({
   livekitSipTrunkId: t.Optional(nullableString),
   twilioCallSid: t.Optional(nullableString),
   twilioAccountSid: t.Optional(nullableString),
+  telnyxCallSid: t.Optional(nullableString),
+  telnyxAccountSid: t.Optional(nullableString),
+  telephonyProvider: t.Optional(telephonyProvider),
   relaySessionId: t.Optional(nullableString),
   recordingSid: t.Optional(nullableString),
   recordingStatus: t.Optional(nullableString),
@@ -344,6 +365,9 @@ export const phoneNumberResponse = t.Object({
   areaCode: t.Optional(nullableString),
   twilioPhoneNumberSid: t.Optional(nullableString),
   twilioAccountSid: t.Optional(nullableString),
+  telnyxPhoneNumberId: t.Optional(nullableString),
+  telnyxAccountSid: t.Optional(nullableString),
+  telephonyProvider: t.Optional(telephonyProvider),
   metadata: t.Optional(nullableRecordUnknown),
   providerOptions: t.Optional(nullableRecordUnknown),
   raw: t.Unknown(),
@@ -379,6 +403,28 @@ export const twilioConfigResponse = t.Object({
 })
 
 export const twilioConfigTestResponse = t.Object({
+  ok: t.Boolean(),
+  providerSource: t.Optional(t.String()),
+})
+
+export const telnyxConfigResponse = t.Object({
+  configured: t.Boolean(),
+  providerSource: t.Union([
+    t.Literal("user"),
+    t.Literal("platform"),
+    t.Literal("none"),
+  ]),
+  accountSidPrefix: t.Optional(nullableString),
+  applicationSidPrefix: t.Optional(nullableString),
+  apiKeyPrefix: t.Optional(nullableString),
+  publicKeyConfigured: t.Boolean(),
+  defaultFromNumber: t.Optional(nullableString),
+  defaultWebhookBaseUrl: t.Optional(nullableString),
+  deleteTelnyxRecordingAfterBlobUpload: t.Boolean(),
+  updatedAt: t.Optional(nullableString),
+})
+
+export const telnyxConfigTestResponse = t.Object({
   ok: t.Boolean(),
   providerSource: t.Optional(t.String()),
 })

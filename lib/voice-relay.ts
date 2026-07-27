@@ -37,30 +37,55 @@ function twilioVoiceError(error: unknown) {
   throw error
 }
 
-async function formParams(request: Request) {
+function telnyxVoiceError(error: unknown) {
+  if (
+    error instanceof VoiceServiceError &&
+    error.code === "TELNYX_SIGNATURE_INVALID"
+  ) {
+    return new Response("Invalid Telnyx signature", { status: 401 })
+  }
+  if (error instanceof VoiceServiceError) {
+    return new Response(
+      '<?xml version="1.0" encoding="UTF-8"?><Response><Say>We could not connect the voice assistant. Please try again later.</Say></Response>',
+      {
+        status: 200,
+        headers: { "content-type": "text/xml; charset=utf-8" },
+      }
+    )
+  }
+  throw error
+}
+
+async function formParamsWithRaw(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
   const params: Record<string, string> = {}
   if (contentType.includes("application/json")) {
-    const body = (await request.json().catch(() => ({}))) as Record<
-      string,
-      unknown
-    >
+    const rawBody = await request.text()
+    const body = JSON.parse(rawBody || "{}") as Record<string, unknown>
     for (const [key, value] of Object.entries(body)) {
       if (typeof value === "string") params[key] = value
+      else if (typeof value === "number" || typeof value === "boolean") {
+        params[key] = String(value)
+      }
     }
-    return params
+    return { params, rawBody }
   }
   if (contentType.includes("application/x-www-form-urlencoded")) {
-    const body = new URLSearchParams(await request.text())
+    const rawBody = await request.text()
+    const body = new URLSearchParams(rawBody)
     for (const [key, value] of body.entries()) params[key] = value
-    return params
+    return { params, rawBody }
   }
-  const body = await request.formData().catch(() => null)
-  if (body) {
-    for (const [key, value] of body.entries()) {
-      if (typeof value === "string") params[key] = value
-    }
+  const rawBody = await request.text()
+  if (rawBody) {
+    const body = new URLSearchParams(rawBody)
+    for (const [key, value] of body.entries()) params[key] = value
   }
+  return { params, rawBody }
+}
+
+async function formParams(request: Request) {
+  const { params } = await formParamsWithRaw(request)
   return params
 }
 
@@ -153,6 +178,71 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       authUser: true,
       response: { 200: s.deleteResponse, ...s.standardErrorResponses },
       detail: { summary: "Delete Twilio config", tags: ["Twilio config"] },
+    }
+  )
+
+  .get(
+    "/telnyx-config",
+    async ({ authed }) =>
+      await getVoiceRelayService().getTelnyxConfig(authed.user.id),
+    {
+      authUser: true,
+      response: { 200: s.telnyxConfigResponse, ...s.standardErrorResponses },
+      detail: {
+        summary: "Get redacted Telnyx config",
+        tags: ["Telnyx config"],
+      },
+    }
+  )
+  .put(
+    "/telnyx-config",
+    async ({ authed, body }) =>
+      await getVoiceRelayService().upsertTelnyxConfig(authed.user.id, {
+        apiKey: body.apiKey,
+        publicKey: body.publicKey,
+        accountSid: body.accountSid,
+        applicationSid: body.applicationSid,
+        defaultFromNumber: body.defaultFromNumber,
+        deleteTelnyxRecordingAfterBlobUpload:
+          body.deleteTelnyxRecordingAfterBlobUpload,
+      }),
+    {
+      authUser: true,
+      body: s.upsertTelnyxConfigBody,
+      response: { 200: s.telnyxConfigResponse, ...s.standardErrorResponses },
+      detail: { summary: "Set Telnyx config", tags: ["Telnyx config"] },
+    }
+  )
+  .post(
+    "/telnyx-config/test",
+    async ({ authed, set }) => {
+      try {
+        return await getVoiceRelayService().testTelnyxConfig(authed.user.id)
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      response: {
+        200: s.telnyxConfigTestResponse,
+        ...s.standardErrorResponses,
+      },
+      detail: { summary: "Test Telnyx config", tags: ["Telnyx config"] },
+    }
+  )
+  .delete(
+    "/telnyx-config",
+    async ({ authed }) => {
+      const deleted = await getVoiceRelayService().deleteTelnyxConfig(
+        authed.user.id
+      )
+      return { ok: true as const, deleted }
+    },
+    {
+      authUser: true,
+      response: { 200: s.deleteResponse, ...s.standardErrorResponses },
+      detail: { summary: "Delete Telnyx config", tags: ["Telnyx config"] },
     }
   )
 
@@ -567,23 +657,26 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
   )
   .post(
     "/phone-numbers/import",
-    async ({ authed, set }) => {
+    async ({ authed, body, set }) => {
       try {
-        return await getVoiceRelayService().importPhoneNumbers(authed.user.id)
+        return await getVoiceRelayService().importPhoneNumbers(authed.user.id, {
+          telephonyProvider: body?.telephonyProvider,
+        })
       } catch (error) {
         return serviceError(error, set)
       }
     },
     {
       authUser: true,
+      body: t.Optional(s.importPhoneNumbersBody),
       response: {
         200: s.importPhoneNumbersResponse,
         ...s.standardErrorResponses,
       },
       detail: {
-        summary: "Import Twilio phone numbers",
+        summary: "Import Twilio or Telnyx phone numbers",
         description:
-          "Imports owned Twilio incoming phone numbers and configures each number to route inbound calls to the ConversationRelay webhook.",
+          "Imports owned Twilio or Telnyx phone numbers and configures each number to route inbound calls to the matching voice webhook. Pass telephonyProvider=telnyx to import from Telnyx; defaults to Twilio when Twilio credentials are configured.",
         tags: ["Phone numbers"],
       },
     }
@@ -754,6 +847,84 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       detail: {
         summary: "Twilio recording webhook",
         tags: ["Twilio webhooks"],
+      },
+    }
+  )
+
+  .post(
+    "/telnyx/voice",
+    async ({ request, query }) => {
+      try {
+        const { params, rawBody } = await formParamsWithRaw(request)
+        const texml = await getVoiceRelayService().handleTelnyxVoiceWebhook({
+          url: publicUrl(request),
+          params,
+          rawBody,
+          signature: request.headers.get("telnyx-signature-ed25519"),
+          timestamp: request.headers.get("telnyx-timestamp"),
+          callId: query.callId,
+        })
+        return new Response(texml, {
+          headers: { "content-type": "text/xml; charset=utf-8" },
+        })
+      } catch (error) {
+        return telnyxVoiceError(error)
+      }
+    },
+    {
+      response: { 200: t.String(), 401: t.String() },
+      detail: { summary: "Telnyx Voice webhook", tags: ["Telnyx webhooks"] },
+    }
+  )
+  .post(
+    "/telnyx/status",
+    async ({ request, query }) =>
+      getVoiceRelayService().handleStatusWebhook({
+        callId: query.callId,
+        params: await formParams(request),
+      }),
+    {
+      response: { 200: s.twilioStatusWebhookResponse },
+      detail: { summary: "Telnyx status webhook", tags: ["Telnyx webhooks"] },
+    }
+  )
+  .post(
+    "/telnyx/recording",
+    async ({ request, query }) => {
+      const result = await getVoiceRelayService().handleRecordingWebhook({
+        callId: query.callId,
+        params: await formParams(request),
+      })
+      const shouldStartWorkflow =
+        result.matched &&
+        result.recordingSid &&
+        result.recordingStatus !== "absent"
+      if (shouldStartWorkflow) {
+        try {
+          await getPostCallWorkflowStarter()({
+            userId: result.userId,
+            callId: result.callId,
+          })
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Post-call workflow failed to start"
+          await getVoiceRelayService().markPostCallWorkflowFailed({
+            userId: result.userId,
+            callId: result.callId,
+            error: message,
+          })
+          return { ...result, workflowStarted: false, workflowError: message }
+        }
+      }
+      return shouldStartWorkflow ? { ...result, workflowStarted: true } : result
+    },
+    {
+      response: { 200: s.twilioRecordingWebhookResponse },
+      detail: {
+        summary: "Telnyx recording webhook",
+        tags: ["Telnyx webhooks"],
       },
     }
   )
