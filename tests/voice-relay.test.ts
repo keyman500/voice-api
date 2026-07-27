@@ -50,6 +50,7 @@ function handle(path: string, init?: RequestInit) {
 
 function createMockRelayService() {
   let twilioConfigured = false
+  let telnyxConfigured = false
   const agents = new Map<string, Record<string, unknown>>()
   const calls = new Map<string, Record<string, unknown>>()
   const phoneNumbers = new Map<string, Record<string, unknown>>()
@@ -90,6 +91,51 @@ function createMockRelayService() {
           400,
           "TWILIO_CONFIG_MISSING",
           "No user Twilio config or platform Twilio fallback is configured"
+        )
+      }
+      return { ok: true, providerSource: "user" }
+    }),
+    getTelnyxConfig: jest.fn(async () => ({
+      configured: telnyxConfigured,
+      providerSource: telnyxConfigured ? "user" : "none",
+      accountSidPrefix: telnyxConfigured ? "acct_tel" : undefined,
+      applicationSidPrefix: telnyxConfigured ? "app_teln" : undefined,
+      apiKeyPrefix: telnyxConfigured ? "KEY12345" : undefined,
+      publicKeyConfigured: false,
+      defaultFromNumber: telnyxConfigured ? "+15555550155" : undefined,
+      defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+      deleteTelnyxRecordingAfterBlobUpload: false,
+      updatedAt: telnyxConfigured ? "2024-01-01T00:00:00.000Z" : undefined,
+    })),
+    upsertTelnyxConfig: jest.fn(
+      async (_userId: string, input: Record<string, unknown>) => {
+        telnyxConfigured = true
+        return {
+          configured: true,
+          providerSource: "user",
+          accountSidPrefix: String(input.accountSid).slice(0, 8),
+          applicationSidPrefix: String(input.applicationSid).slice(0, 8),
+          apiKeyPrefix: String(input.apiKey).slice(0, 8),
+          publicKeyConfigured: Boolean(input.publicKey),
+          defaultFromNumber: input.defaultFromNumber,
+          defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+          deleteTelnyxRecordingAfterBlobUpload:
+            input.deleteTelnyxRecordingAfterBlobUpload ?? false,
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        }
+      }
+    ),
+    deleteTelnyxConfig: jest.fn(async () => {
+      const wasConfigured = telnyxConfigured
+      telnyxConfigured = false
+      return wasConfigured
+    }),
+    testTelnyxConfig: jest.fn(async () => {
+      if (!telnyxConfigured) {
+        throw new VoiceServiceError(
+          400,
+          "TELNYX_CONFIG_MISSING",
+          "No user Telnyx config or platform Telnyx fallback is configured"
         )
       }
       return { ok: true, providerSource: "user" }
@@ -138,6 +184,49 @@ function createMockRelayService() {
     ),
     createCall: jest.fn(
       async (_userId: string, input: Record<string, unknown>) => {
+        const wantsTelnyx =
+          input.providerOptions &&
+          typeof input.providerOptions === "object" &&
+          (input.providerOptions as Record<string, unknown>)
+            .telephonyProvider === "telnyx"
+        if (wantsTelnyx || (telnyxConfigured && !twilioConfigured)) {
+          if (!telnyxConfigured) {
+            throw new VoiceServiceError(
+              400,
+              "TELNYX_CONFIG_MISSING",
+              "No user Telnyx config or platform Telnyx fallback is configured"
+            )
+          }
+          const call = {
+            id: "call-1",
+            provider: VOICE_API_PROVIDER_ID,
+            agentId: input.agentId,
+            phoneNumberId: input.phoneNumberId,
+            toNumber: input.toNumber,
+            fromNumber: input.fromNumber ?? "+15555550155",
+            status: "ringing",
+            telnyxCallSid: "v3:telnyx-call-1",
+            telnyxAccountSid: "acct_telnyx_1",
+            telephonyProvider: "telnyx",
+            recordingSid: "rec_telnyx_1",
+            postCallStatus: "processing",
+            callSuccessful: true,
+            successEvaluationStatus: "ready",
+            successEvaluationReason: "The call was successful.",
+            billing: {
+              status: "ready",
+              runtimeCredits: 2,
+              agentCredits: 0.25,
+              postCallCredits: 0.05,
+              totalCredits: 2.3,
+              creditsRemaining: 997.7,
+              estimatedOverageCredits: 0,
+            },
+            raw: { telnyx: { sid: "v3:telnyx-call-1" } },
+          }
+          calls.set(call.id, call)
+          return call
+        }
         if (!twilioConfigured) {
           throw new VoiceServiceError(
             400,
@@ -155,6 +244,7 @@ function createMockRelayService() {
           status: "ringing",
           twilioCallSid: "CA123",
           twilioAccountSid: "AC123",
+          telephonyProvider: "twilio",
           recordingSid: "RE123",
           postCallStatus: "processing",
           callSuccessful: true,
@@ -405,6 +495,58 @@ describe("/api/v1 relay routes", () => {
     expect(JSON.stringify(body)).not.toContain("secret-token")
   })
 
+  it("PUT /api/v1/telnyx-config stores config without returning secrets", async () => {
+    const res = await handle("/api/v1/telnyx-config", {
+      method: "PUT",
+      body: JSON.stringify({
+        apiKey: "KEY-secret-token",
+        publicKey: "public-secret",
+        accountSid: "acct_telnyx_1",
+        applicationSid: "app_telnyx_1",
+        defaultFromNumber: "+15555550155",
+        deleteTelnyxRecordingAfterBlobUpload: true,
+      }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({
+      configured: true,
+      accountSidPrefix: "acct_tel",
+      applicationSidPrefix: "app_teln",
+      apiKeyPrefix: "KEY-secr",
+      publicKeyConfigured: true,
+      deleteTelnyxRecordingAfterBlobUpload: true,
+    })
+    expect(JSON.stringify(body)).not.toContain("KEY-secret-token")
+    expect(JSON.stringify(body)).not.toContain("public-secret")
+  })
+
+  it("POST /api/v1/calls returns Telnyx call identifiers when requested", async () => {
+    await handle("/api/v1/telnyx-config", {
+      method: "PUT",
+      body: JSON.stringify({
+        apiKey: "KEY123456789",
+        accountSid: "acct_telnyx_1",
+        applicationSid: "app_telnyx_1",
+      }),
+    })
+    const res = await handle("/api/v1/calls", {
+      method: "POST",
+      body: JSON.stringify({
+        toNumber: "+15555550100",
+        providerOptions: { telephonyProvider: "telnyx" },
+      }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({
+      status: "ringing",
+      telnyxCallSid: "v3:telnyx-call-1",
+      telnyxAccountSid: "acct_telnyx_1",
+      telephonyProvider: "telnyx",
+    })
+  })
+
   it("POST /api/v1/calls returns Twilio call identifiers", async () => {
     await handle("/api/v1/twilio-config", {
       method: "PUT",
@@ -489,7 +631,9 @@ describe("/api/v1 relay routes", () => {
         }),
       ],
     })
-    expect(service.importPhoneNumbers).toHaveBeenCalledWith(fakeUser.id)
+    expect(service.importPhoneNumbers).toHaveBeenCalledWith(fakeUser.id, {
+      telephonyProvider: undefined,
+    })
   })
 
   it("POST /api/v1/agents accepts success evaluation and redacts webhook secret", async () => {

@@ -22,6 +22,7 @@ function mockAsync(implementation?: (...args: unknown[]) => Promise<unknown>) {
 
 function createProcessRepo() {
   const twilioConfigs = new Map<string, Record<string, unknown>>()
+  const telnyxConfigs = new Map<string, Record<string, unknown>>()
   const agents = new Map<string, Record<string, unknown>>()
   const calls = new Map<string, Record<string, unknown>>()
   const phones = new Map<string, Record<string, unknown>>()
@@ -75,6 +76,74 @@ function createProcessRepo() {
           row.deleteTwilioRecordingAfterBlobUpload ?? false,
         source: "user",
       }
+    }),
+    getTelnyxConfig: mockAsync(async (userId) => {
+      const row = telnyxConfigs.get(String(userId))
+      if (!row) {
+        return {
+          configured: false,
+          providerSource: "none",
+          publicKeyConfigured: false,
+          deleteTelnyxRecordingAfterBlobUpload: false,
+        }
+      }
+      return {
+        configured: true,
+        providerSource: "user",
+        accountSidPrefix: String(row.accountSid).slice(0, 8),
+        applicationSidPrefix: String(row.applicationSid).slice(0, 8),
+        apiKeyPrefix: String(row.apiKey).slice(0, 8),
+        publicKeyConfigured: Boolean(row.publicKey),
+        defaultFromNumber: row.defaultFromNumber,
+        defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+        deleteTelnyxRecordingAfterBlobUpload:
+          row.deleteTelnyxRecordingAfterBlobUpload ?? false,
+        updatedAt: row.updatedAt,
+      }
+    }),
+    upsertTelnyxConfig: mockAsync(async (userId, input) => {
+      const row: Record<string, unknown> = {
+        ...(input as Record<string, unknown>),
+        updatedAt: "2024-01-01T00:00:00.000Z",
+      }
+      telnyxConfigs.set(String(userId), row)
+      return {
+        configured: true,
+        providerSource: "user",
+        accountSidPrefix: String(row.accountSid).slice(0, 8),
+        applicationSidPrefix: String(row.applicationSid).slice(0, 8),
+        apiKeyPrefix: String(row.apiKey).slice(0, 8),
+        publicKeyConfigured: Boolean(row.publicKey),
+        defaultFromNumber: row.defaultFromNumber,
+        defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+        deleteTelnyxRecordingAfterBlobUpload:
+          row.deleteTelnyxRecordingAfterBlobUpload ?? false,
+        updatedAt: row.updatedAt,
+      }
+    }),
+    deleteTelnyxConfig: mockAsync(async (userId) =>
+      telnyxConfigs.delete(String(userId))
+    ),
+    resolveTelnyxCredentials: mockAsync(async (userId) => {
+      const row = telnyxConfigs.get(String(userId))
+      if (!row) return null
+      return {
+        apiKey: row.apiKey,
+        publicKey: row.publicKey,
+        accountSid: row.accountSid,
+        applicationSid: row.applicationSid,
+        defaultFromNumber: row.defaultFromNumber,
+        defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+        deleteTelnyxRecordingAfterBlobUpload:
+          row.deleteTelnyxRecordingAfterBlobUpload ?? false,
+        source: "user",
+      }
+    }),
+    findCallByTelnyxCallSid: mockAsync(async (telnyxCallSid) => {
+      const found = Array.from(calls.values()).find(
+        (call) => call.telnyxCallSid === telnyxCallSid
+      )
+      return found ? { ...found, userId: found.userId ?? fakeUser.id } : null
     }),
     createAgent: mockAsync(async (userId, input) => {
       const row: Record<string, unknown> = {
@@ -200,7 +269,15 @@ function createProcessRepo() {
 
   return {
     repo,
-    stores: { twilioConfigs, agents, calls, phones, events, transcriptItems },
+    stores: {
+      twilioConfigs,
+      telnyxConfigs,
+      agents,
+      calls,
+      phones,
+      events,
+      transcriptItems,
+    },
   }
 }
 
@@ -276,6 +353,70 @@ function createTwilioMock() {
           voice_url: input.voiceUrl,
           status_callback: input.statusCallbackUrl,
         },
+      })
+    ),
+    mediaStreamTwiML: jest.fn(
+      (input: { websocketUrl: string }) =>
+        `<Response><Connect><Stream url="${input.websocketUrl}" /></Connect></Response>`
+    ),
+  }
+}
+
+function createTelnyxMock() {
+  return {
+    testCredentials: jest.fn(async () => undefined),
+    createCall: jest.fn(async () => ({
+      sid: "v3:telnyx-call-1",
+      accountSid: "acct_telnyx_1",
+      status: "ringing",
+      raw: { call_sid: "v3:telnyx-call-1", status: "ringing" },
+    })),
+    streamTeXML: jest.fn(
+      (input: { websocketUrl: string; welcomeGreeting?: string }) => {
+        const greeting = input.welcomeGreeting
+          ? `<Say>${input.welcomeGreeting}</Say>`
+          : ""
+        return `<Response>${greeting}<Start><Stream url="${input.websocketUrl}" track="both_tracks" /></Start></Response>`
+      }
+    ),
+    sayTeXML: jest.fn(
+      (message: string) => `<Response><Say>${message}</Say></Response>`
+    ),
+    validateSignature: jest.fn(() => true),
+    getRecording: jest.fn(async () => ({
+      sid: "rec_telnyx_1",
+      status: "completed",
+      contentType: "audio/mpeg",
+      downloadUrl: "https://example.com/rec.mp3",
+      raw: { id: "rec_telnyx_1", status: "completed" },
+    })),
+    fetchRecordingMedia: jest.fn(async () => ({
+      body: "audio bytes",
+      contentType: "audio/mpeg",
+      size: 11,
+    })),
+    deleteRecording: jest.fn(async () => undefined),
+    listIncomingPhoneNumbers: jest.fn(async () => [
+      {
+        id: "pn_telnyx_1",
+        accountSid: "acct_telnyx_1",
+        phoneNumber: "+15555550155",
+        friendlyName: "Telnyx Support",
+        connectionId: "app_telnyx_1",
+        raw: { id: "pn_telnyx_1", phone_number: "+15555550155" },
+      },
+    ]),
+    updateIncomingPhoneNumberConnection: jest.fn(
+      async (
+        _credentials: unknown,
+        input: { id: string; connectionId: string }
+      ) => ({
+        id: input.id,
+        accountSid: "acct_telnyx_1",
+        phoneNumber: "+15555550155",
+        friendlyName: "Telnyx Support",
+        connectionId: input.connectionId,
+        raw: { id: input.id, connection_id: input.connectionId },
       })
     ),
   }
@@ -1689,6 +1830,222 @@ describe("voice relay service process behavior", () => {
     expect(stores.calls.get(String(call.id))).toMatchObject({
       postCallStatus: "failed",
       recordingIngestionError: "blob down",
+    })
+  })
+
+  it("creates outbound calls through Telnyx when only Telnyx is configured", async () => {
+    process.env.TELNYX_WEBHOOK_BASE_URL = "https://voice.example.com"
+    const { repo } = createProcessRepo()
+    const twilio = createTwilioMock()
+    const telnyx = createTelnyxMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      createBillingMock() as never,
+      telnyx as never
+    )
+
+    await service.upsertTelnyxConfig(fakeUser.id, {
+      apiKey: "KEY123456789",
+      accountSid: "acct_telnyx_1",
+      applicationSid: "app_telnyx_1",
+      defaultFromNumber: "+15555550155",
+    })
+
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+      providerOptions: { record: true },
+    })
+
+    expect(call).toMatchObject({
+      status: "ringing",
+      telnyxCallSid: "v3:telnyx-call-1",
+      telnyxAccountSid: "acct_telnyx_1",
+      telephonyProvider: "telnyx",
+    })
+    expect(twilio.createCall).not.toHaveBeenCalled()
+    expect(telnyx.createCall as jest.Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: "KEY123456789",
+        applicationSid: "app_telnyx_1",
+      }),
+      expect.objectContaining({
+        to: "+15555550100",
+        from: "+15555550155",
+        voiceUrl: expect.stringContaining("/api/v1/telnyx/voice?callId="),
+        statusCallbackUrl: expect.stringContaining(
+          "/api/v1/telnyx/status?callId="
+        ),
+        recordingStatusCallbackUrl: expect.stringContaining(
+          "/api/v1/telnyx/recording?callId="
+        ),
+      })
+    )
+  })
+
+  it("uses Telnyx when providerOptions.telephonyProvider is telnyx", async () => {
+    process.env.TELNYX_WEBHOOK_BASE_URL = "https://voice.example.com"
+    process.env.TWILIO_WEBHOOK_BASE_URL = "https://voice.example.com"
+    const { repo } = createProcessRepo()
+    const twilio = createTwilioMock()
+    const telnyx = createTelnyxMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      twilio as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      createBillingMock() as never,
+      telnyx as never
+    )
+
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+    })
+    await service.upsertTelnyxConfig(fakeUser.id, {
+      apiKey: "KEY123456789",
+      accountSid: "acct_telnyx_1",
+      applicationSid: "app_telnyx_1",
+      defaultFromNumber: "+15555550155",
+    })
+
+    const call = await service.createCall(fakeUser.id, {
+      toNumber: "+15555550100",
+      providerOptions: { telephonyProvider: "telnyx" },
+    })
+
+    expect(call.telephonyProvider).toBe("telnyx")
+    expect(telnyx.createCall).toHaveBeenCalled()
+    expect(twilio.createCall).not.toHaveBeenCalled()
+  })
+
+  it("imports Telnyx phone numbers onto the TeXML application", async () => {
+    process.env.TELNYX_WEBHOOK_BASE_URL = "https://voice.example.com"
+    const { repo } = createProcessRepo()
+    const telnyx = createTelnyxMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      createBillingMock() as never,
+      telnyx as never
+    )
+
+    await service.upsertTelnyxConfig(fakeUser.id, {
+      apiKey: "KEY123456789",
+      accountSid: "acct_telnyx_1",
+      applicationSid: "app_telnyx_1",
+    })
+
+    const result = await service.importPhoneNumbers(fakeUser.id, {
+      telephonyProvider: "telnyx",
+    })
+
+    expect(result.imported).toBe(1)
+    expect(telnyx.listIncomingPhoneNumbers).toHaveBeenCalled()
+    expect(telnyx.updateIncomingPhoneNumberConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: "pn_telnyx_1",
+        connectionId: "app_telnyx_1",
+      }
+    )
+    expect(result.items[0]).toMatchObject({
+      number: "+15555550155",
+      telephonyProvider: "telnyx",
+      telnyxPhoneNumberId: "pn_telnyx_1",
+    })
+  })
+
+  it("returns TeXML Stream for Telnyx voice webhooks", async () => {
+    process.env.TELNYX_WEBHOOK_BASE_URL = "https://voice.example.com"
+    const { repo } = createProcessRepo()
+    const telnyx = createTelnyxMock()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      createBillingMock() as never,
+      telnyx as never
+    )
+
+    await service.upsertTelnyxConfig(fakeUser.id, {
+      apiKey: "KEY123456789",
+      accountSid: "acct_telnyx_1",
+      applicationSid: "app_telnyx_1",
+      defaultFromNumber: "+15555550155",
+      publicKey: "unused-for-this-test",
+    })
+    await service.createAgent(fakeUser.id, {
+      name: "Support",
+      firstMessage: "Hello from Telnyx",
+    })
+    const call = await service.createCall(fakeUser.id, {
+      agentId: "agent-1",
+      toNumber: "+15555550100",
+      providerOptions: { telephonyProvider: "telnyx" },
+    })
+
+    const texml = await service.handleTelnyxVoiceWebhook({
+      url: `https://voice.example.com/api/v1/telnyx/voice?callId=${call.id}`,
+      rawBody: "CallSid=v3%3Atelnyx-call-1&From=%2B15555550155",
+      signature: "sig",
+      timestamp: String(Math.floor(Date.now() / 1000)),
+      callId: String(call.id),
+      params: {
+        CallSid: "v3:telnyx-call-1",
+        From: "+15555550155",
+        To: "+15555550100",
+      },
+    })
+
+    expect(telnyx.streamTeXML).toHaveBeenCalled()
+    expect(texml).toContain("<Stream")
+    expect(texml).toContain("/api/v1/relay/ws")
+  })
+
+  it("rejects invalid Telnyx signatures when a public key is configured", async () => {
+    const { repo } = createProcessRepo()
+    const telnyx = createTelnyxMock()
+    telnyx.validateSignature.mockReturnValue(false)
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never,
+      createBillingMock() as never,
+      telnyx as never
+    )
+
+    await service.upsertTelnyxConfig(fakeUser.id, {
+      apiKey: "KEY123456789",
+      accountSid: "acct_telnyx_1",
+      applicationSid: "app_telnyx_1",
+      publicKey: "public-key",
+    })
+    await service.createAgent(fakeUser.id, { name: "Support" })
+    await service.createPhoneNumber(fakeUser.id, {
+      number: "+15555550155",
+      inboundAgentId: "agent-1",
+      providerOptions: { telephonyProvider: "telnyx" },
+    })
+
+    await expect(
+      service.handleTelnyxVoiceWebhook({
+        url: "https://voice.example.com/api/v1/telnyx/voice",
+        rawBody: "To=%2B15555550155",
+        signature: "bad",
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        params: { To: "+15555550155", From: "+15555550100", CallSid: "v3:1" },
+      })
+    ).rejects.toMatchObject({
+      code: "TELNYX_SIGNATURE_INVALID",
+      status: 401,
     })
   })
 })
