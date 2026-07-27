@@ -23,6 +23,7 @@ function mockAsync(implementation?: (...args: unknown[]) => Promise<unknown>) {
 function createProcessRepo() {
   const twilioConfigs = new Map<string, Record<string, unknown>>()
   const agents = new Map<string, Record<string, unknown>>()
+  const tools = new Map<string, Record<string, unknown>>()
   const calls = new Map<string, Record<string, unknown>>()
   const phones = new Map<string, Record<string, unknown>>()
   const events = new Map<string, Record<string, unknown>[]>()
@@ -103,6 +104,75 @@ function createProcessRepo() {
       return agent?.webhookSecret ?? null
     }),
     deleteAgent: mockAsync(async (_userId, id) => agents.delete(String(id))),
+    createTool: mockAsync(async (userId, input) => {
+      const row: Record<string, unknown> = {
+        id: `tool-${tools.size + 1}`,
+        provider: VOICE_API_PROVIDER_ID,
+        userId,
+        async: false,
+        raw: {},
+        ...(input as Record<string, unknown>),
+        isAsync: (input as Record<string, unknown>).isAsync ?? false,
+      }
+      if (row.server && typeof row.server === "object") {
+        const server = row.server as Record<string, unknown>
+        row.server = {
+          url: server.url,
+          timeoutSeconds: server.timeoutSeconds,
+          headers: server.headers,
+          secretConfigured: Boolean(server.secret),
+        }
+        row._serverSecret = server.secret ?? null
+      }
+      tools.set(String(row.id), row)
+      const { _serverSecret: _secret, ...publicRow } = row
+      void _secret
+      return {
+        ...publicRow,
+        async: row.isAsync,
+      }
+    }),
+    listTools: mockAsync(async () => ({
+      items: Array.from(tools.values()).map((tool) => {
+        const { _serverSecret: _secret, ...publicRow } = tool
+        void _secret
+        return { ...publicRow, async: tool.isAsync ?? false }
+      }),
+      hasMore: false,
+    })),
+    getTool: mockAsync(async (_userId, id) => {
+      const tool = tools.get(String(id))
+      if (!tool) return null
+      const { _serverSecret: _secret, ...publicRow } = tool
+      void _secret
+      return { ...publicRow, async: tool.isAsync ?? false }
+    }),
+    getToolsByIds: mockAsync(async (_userId, ids) => {
+      const list = ids as string[]
+      return list
+        .map((id) => tools.get(String(id)))
+        .filter(Boolean)
+        .map((tool) => {
+          const row = tool as Record<string, unknown>
+          const { _serverSecret: _secret, ...publicRow } = row
+          void _secret
+          return { ...publicRow, async: row.isAsync ?? false }
+        })
+    }),
+    updateTool: mockAsync(async (_userId, id, input) => {
+      const current = tools.get(String(id))
+      if (!current) return null
+      const next = { ...current, ...(input as Record<string, unknown>) }
+      tools.set(String(id), next)
+      const { _serverSecret: _secret, ...publicRow } = next
+      void _secret
+      return { ...publicRow, async: next.isAsync ?? false }
+    }),
+    resolveToolServerSecret: mockAsync(async (_userId, toolId) => {
+      const tool = tools.get(String(toolId))
+      return tool?._serverSecret ?? null
+    }),
+    deleteTool: mockAsync(async (_userId, id) => tools.delete(String(id))),
     createCall: mockAsync(async (userId, input) => {
       const row: Record<string, unknown> = {
         id: "call-1",
@@ -200,7 +270,15 @@ function createProcessRepo() {
 
   return {
     repo,
-    stores: { twilioConfigs, agents, calls, phones, events, transcriptItems },
+    stores: {
+      twilioConfigs,
+      agents,
+      tools,
+      calls,
+      phones,
+      events,
+      transcriptItems,
+    },
   }
 }
 
@@ -1690,5 +1768,245 @@ describe("voice relay service process behavior", () => {
       postCallStatus: "failed",
       recordingIngestionError: "blob down",
     })
+  })
+
+  it("creates and tests a function tool without placing a phone call", async () => {
+    const { repo } = createProcessRepo()
+    const fetchImpl = jest.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            results: [{ toolCallId: "ignored", result: "account found" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    )
+    const originalFetch = global.fetch
+    global.fetch = fetchImpl as unknown as typeof fetch
+
+    try {
+      const service = createVoiceRelayService(
+        repo as never,
+        createTwilioMock() as never,
+        createLlmMock() as never,
+        createFilesMock() as never
+      )
+
+      const tool = await service.createTool(fakeUser.id, {
+        type: "function",
+        name: "Account lookup",
+        function: {
+          name: "lookup_account",
+          description: "Find an account",
+          parameters: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        server: {
+          url: "https://tools.example.com/lookup",
+          secret: "tool-secret",
+        },
+      })
+
+      expect(tool).toMatchObject({
+        type: "function",
+        function: { name: "lookup_account" },
+        server: {
+          url: "https://tools.example.com/lookup",
+          secretConfigured: true,
+        },
+      })
+      expect(JSON.stringify(tool)).not.toContain("tool-secret")
+
+      const testResult = await service.testTool(fakeUser.id, String(tool.id), {
+        arguments: { query: "acme" },
+      })
+      expect(testResult).toMatchObject({
+        ok: true,
+        name: "lookup_account",
+        result: "account found",
+      })
+      expect(fetchImpl).toHaveBeenCalled()
+      const [url, init] = fetchImpl.mock.calls[0] as unknown as [
+        string,
+        RequestInit,
+      ]
+      expect(url).toBe("https://tools.example.com/lookup")
+      expect(init.method).toBe("POST")
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it("rejects agent toolIds that are not owned by the user", async () => {
+    const { repo } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+
+    await expect(
+      service.createAgent(fakeUser.id, {
+        voiceEngine: "conversation-relay",
+        name: "Broken",
+        toolIds: ["missing-tool"],
+      })
+    ).rejects.toMatchObject({
+      code: "TOOL_IDS_INVALID",
+      status: 400,
+    })
+  })
+
+  it("relay prompt executes attached tools through the LLM tools context", async () => {
+    const { repo, stores } = createProcessRepo()
+    // Custom LLM mock that exercises the toolsContext callbacks.
+    const llm = {
+      streamResponse: jest.fn((input: Record<string, unknown>) => {
+        async function* textStream() {
+          const toolsContext = input.toolsContext as
+            | {
+                onToolEvent?: (event: Record<string, unknown>) => void | Promise<void>
+              }
+            | undefined
+          if (toolsContext?.onToolEvent) {
+            await toolsContext.onToolEvent({
+              toolCallId: "call_tool_1",
+              name: "lookup_account",
+              arguments: { query: "acme" },
+              result: {
+                toolCallId: "call_tool_1",
+                name: "lookup_account",
+                result: "",
+                ok: true,
+              },
+              phase: "start",
+              speak: "Looking that up.",
+            })
+            await toolsContext.onToolEvent({
+              toolCallId: "call_tool_1",
+              name: "lookup_account",
+              arguments: { query: "acme" },
+              result: {
+                toolCallId: "call_tool_1",
+                name: "lookup_account",
+                result: "Account ACME is active",
+                ok: true,
+              },
+              phase: "complete",
+            })
+          }
+          yield "Your account is active."
+        }
+        return {
+          model: "openai/gpt-4o-mini",
+          textStream: textStream(),
+          usage: Promise.resolve({
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+          }),
+        }
+      }),
+      analyzeCall: jest.fn(async () => ({
+        model: "openai/gpt-4o-mini",
+        analysis: { summary: "ok" },
+        usage: {},
+      })),
+      evaluateCallSuccess: jest.fn(async () => ({
+        model: "openai/gpt-4o-mini",
+        evaluation: { successful: true, reason: "ok" },
+        usage: {},
+      })),
+    }
+
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      llm as never,
+      createFilesMock() as never
+    )
+
+    const tool = await service.createTool(fakeUser.id, {
+      type: "function",
+      name: "lookup",
+      function: {
+        name: "lookup_account",
+        parameters: { type: "object", properties: {} },
+      },
+      server: { url: "https://tools.example.com/lookup" },
+      messages: [{ type: "request-start", content: "Looking that up." }],
+    })
+    await service.createAgent(fakeUser.id, {
+      voiceEngine: "conversation-relay",
+      name: "Support",
+      model: { provider: "openai", model: "gpt-4o-mini" },
+      toolIds: [String(tool.id)],
+    })
+    await service.upsertTwilioConfig(fakeUser.id, {
+      accountSid: "AC123456789",
+      authToken: "token",
+      defaultFromNumber: "+15555550123",
+    })
+    const call = await service.createCall(fakeUser.id, {
+      agentId: "agent-1",
+      toNumber: "+15555550100",
+    })
+
+    const sent: unknown[] = []
+    await service.handleRelayMessage({
+      userId: fakeUser.id,
+      callId: String(call.id),
+      message: {
+        type: "prompt",
+        voicePrompt: "Look up account ACME",
+        last: true,
+      },
+      send: (message: unknown) => sent.push(message),
+    })
+
+    expect(llm.streamResponse).toHaveBeenCalled()
+    const streamArgs = llm.streamResponse.mock.calls[0]?.[0] as {
+      toolsContext?: { tools?: Array<{ id: string }> }
+    }
+    expect(streamArgs.toolsContext?.tools?.[0]?.id).toBe(tool.id)
+    const textTokens = sent
+      .filter(
+        (message): message is { type: string; token: string } =>
+          Boolean(
+            message &&
+              typeof message === "object" &&
+              (message as { type?: string }).type === "text"
+          )
+      )
+      .map((message) => message.token)
+    expect(textTokens).toContain("Looking that up.")
+    expect(textTokens).toContain("Your account is active.")
+
+    const events = stores.events.get(String(call.id)) ?? []
+    expect(
+      events.some(
+        (event) =>
+          event.type === "tool.call.completed" &&
+          Boolean(event.payload) &&
+          typeof event.payload === "object" &&
+          (event.payload as { name?: string; result?: string }).name ===
+            "lookup_account" &&
+          (event.payload as { result?: string }).result ===
+            "Account ACME is active"
+      )
+    ).toBe(true)
+
+    const transcript = stores.transcriptItems.get(String(call.id)) ?? []
+    expect(
+      transcript.some(
+        (item) =>
+          item.role === "tool" &&
+          String(item.text).includes("lookup_account")
+      )
+    ).toBe(true)
   })
 })
