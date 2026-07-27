@@ -2,6 +2,37 @@ import { VOICE_API_PROVIDER_ID } from "../voice-constants"
 import type { VoiceEngine } from "./realtime-models"
 
 /** In-memory / wire representation — `startedAt`/`endedAt` as ISO strings in JSON. */
+export type JsonToolFunction = {
+  name: string
+  description?: string
+  parameters?: Record<string, unknown>
+}
+
+export type JsonToolServer = {
+  url: string
+  timeoutSeconds?: number
+  headers?: Record<string, string>
+  /** Present only when configuring; never returned after store. */
+  secret?: string
+}
+
+export type JsonTool = {
+  id: string
+  provider: typeof VOICE_API_PROVIDER_ID
+  type: string
+  name?: string
+  description?: string
+  function?: JsonToolFunction
+  server?: Omit<JsonToolServer, "secret"> & { secretConfigured?: boolean }
+  messages?: Array<Record<string, unknown>>
+  async?: boolean
+  metadata?: Record<string, unknown>
+  providerOptions?: Record<string, unknown>
+  raw: unknown
+  createdAt?: string
+  updatedAt?: string
+}
+
 export type JsonAgent = {
   id: string
   provider: typeof VOICE_API_PROVIDER_ID
@@ -14,6 +45,8 @@ export type JsonAgent = {
     systemPrompt?: string
     knowledgeBaseIds?: string[]
   }
+  /** IDs of reusable tools attached to this agent (Vapi-style). */
+  toolIds?: string[]
   firstMessage?: string
   maxDurationSeconds?: number
   successEvaluationPrompt?: string

@@ -179,6 +179,8 @@ export const voiceAgent = pgTable(
     voiceEngine: text("voice_engine").default("conversation-relay").notNull(),
     voice: jsonb("voice").$type<Record<string, unknown> | null>(),
     model: jsonb("model").$type<Record<string, unknown> | null>(),
+    /** Vapi-style references to reusable `voice_tool` rows. */
+    toolIds: jsonb("tool_ids").$type<string[] | null>(),
     firstMessage: text("first_message"),
     maxDurationSeconds: integer("max_duration_seconds"),
     backgroundSound: text("background_sound"),
@@ -201,6 +203,43 @@ export const voiceAgent = pgTable(
       .notNull(),
   },
   (table) => [index("voice_agent_user_id_idx").on(table.userId)]
+)
+
+/**
+ * Reusable custom tools (Vapi-style function + server URL).
+ * Agents attach tools via `voice_agent.tool_ids`.
+ */
+export const voiceTool = pgTable(
+  "voice_tool",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: text("type").notNull().$defaultFn(() => "function"),
+    name: text("name"),
+    description: text("description"),
+    /** OpenAI-style function schema: { name, description, parameters }. */
+    function: jsonb("function").$type<Record<string, unknown> | null>(),
+    /** Server endpoint config: { url, timeoutSeconds?, headers? }. */
+    server: jsonb("server").$type<Record<string, unknown> | null>(),
+    /** Optional spoken messages during tool execution. */
+    messages: jsonb("messages").$type<Record<string, unknown>[] | null>(),
+    isAsync: boolean("async").$defaultFn(() => false).notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+    providerOptions: jsonb("provider_options").$type<Record<
+      string,
+      unknown
+    > | null>(),
+    raw: jsonb("raw").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("voice_tool_user_id_idx").on(table.userId)]
 )
 
 export const voiceCall = pgTable(
