@@ -58,6 +58,11 @@ export const app = new Elysia({ prefix: "/api" })
           { name: "Authentication", description: "Use a session cookie, Bearer API key, or x-api-key header for protected v1 routes" },
           { name: "Twilio config", description: "Encrypted BYOK Twilio connection settings" },
           { name: "Agents", description: "Voice agent configuration" },
+          {
+            name: "Tools",
+            description:
+              "Vapi-style custom function tools with server URL callbacks; attach to agents via toolIds",
+          },
           { name: "Calls", description: "Call resources backed by Twilio ConversationRelay and local logs" },
           { name: "Logs", description: "Call history, transcript, recording, and post-call analysis resources exposed through the calls endpoints" },
           { name: "Phone numbers", description: "Phone number bindings" },

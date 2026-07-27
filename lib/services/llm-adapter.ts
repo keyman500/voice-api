@@ -1,11 +1,49 @@
-import { generateText, streamText } from "ai"
+import {
+  generateText,
+  jsonSchema,
+  stepCountIs,
+  streamText,
+  tool,
+  type ToolSet,
+} from "ai"
 import type { TokenUsage } from "./billing"
-import type { JsonAgent } from "./voice-types"
+import type { JsonAgent, JsonTool } from "./voice-types"
+import {
+  buildAiToolDefinitions,
+  executeToolCall,
+  speakMessageFor,
+  type ToolCallResult,
+} from "./tool-executor"
 
 export type LlmStreamResponse = {
   model: string
   textStream: AsyncIterable<string>
   usage: Promise<TokenUsage>
+}
+
+export type LlmToolCallEvent = {
+  toolCallId: string
+  name: string
+  arguments: Record<string, unknown>
+  result: ToolCallResult
+  speak?: string
+  phase?: "start" | "complete"
+}
+
+export type LlmStreamToolsContext = {
+  tools: JsonTool[]
+  call: {
+    id: string
+    agentId?: string
+    toNumber?: string
+    fromNumber?: string
+    status?: string
+    direction?: string
+  }
+  onToolEvent?: (event: LlmToolCallEvent) => void | Promise<void>
+  fetchImpl?: typeof fetch
+  resolveToolSecret?: (toolId: string) => Promise<string | null>
+  maxSteps?: number
 }
 
 export type LlmAnalysisResponse = {
@@ -26,6 +64,7 @@ export type LlmAdapter = {
     callId: string
     messages: Array<{ role: "user" | "assistant" | "system"; content: string }>
     signal?: AbortSignal
+    toolsContext?: LlmStreamToolsContext
   }): LlmStreamResponse
   analyzeCall(input: {
     callId: string
@@ -75,28 +114,141 @@ function normalizeUsage(usage: unknown): TokenUsage {
   return { inputTokens, outputTokens, totalTokens }
 }
 
-export const llmAdapter: LlmAdapter = {
-  streamResponse({ agent, callId, messages, signal }) {
-    const model = gatewayModelFor(agent)
-    const result = streamText({
-      model,
-      system:
-        agent.model?.systemPrompt ??
-        "You are a concise, helpful voice assistant. Keep replies natural and brief for a phone call.",
-      messages,
-      maxRetries: Number(process.env.AI_GATEWAY_MAX_RETRIES ?? 0),
-      abortSignal: signal,
-      providerOptions: {
-        gateway: {
-          user: callId,
-          tags: ["feature:voice-relay"],
-        },
+async function buildToolSet(
+  agent: JsonAgent,
+  toolsContext: LlmStreamToolsContext,
+  signal?: AbortSignal
+): Promise<ToolSet> {
+  const definitions = buildAiToolDefinitions(toolsContext.tools)
+  const tools: ToolSet = {}
+
+  for (const definition of definitions) {
+    tools[definition.name] = tool({
+      description: definition.description,
+      inputSchema: jsonSchema<Record<string, unknown>>(definition.parameters),
+      execute: async (args, options) => {
+        const toolCallId = options.toolCallId
+        const argumentsRecord =
+          args && typeof args === "object"
+            ? (args as Record<string, unknown>)
+            : {}
+
+        const startSpeak = speakMessageFor(definition.tool, "request-start")
+        if (startSpeak) {
+          await toolsContext.onToolEvent?.({
+            toolCallId,
+            name: definition.name,
+            arguments: argumentsRecord,
+            result: {
+              toolCallId,
+              name: definition.name,
+              result: "",
+              ok: true,
+            },
+            speak: startSpeak,
+            phase: "start",
+          })
+        }
+
+        const secret = toolsContext.resolveToolSecret
+          ? await toolsContext.resolveToolSecret(definition.tool.id)
+          : null
+
+        const result = await executeToolCall({
+          tool: {
+            ...definition.tool,
+            server: definition.tool.server
+              ? {
+                  ...definition.tool.server,
+                  secret: secret ?? undefined,
+                }
+              : undefined,
+          },
+          call: toolsContext.call,
+          agent: { id: agent.id, name: agent.name },
+          toolCall: {
+            id: toolCallId,
+            name: definition.name,
+            arguments: argumentsRecord,
+          },
+          signal,
+          fetchImpl: toolsContext.fetchImpl,
+        })
+
+        const speak = speakMessageFor(
+          definition.tool,
+          result.ok ? "request-complete" : "request-failed"
+        )
+        await toolsContext.onToolEvent?.({
+          toolCallId,
+          name: definition.name,
+          arguments: argumentsRecord,
+          result,
+          speak,
+          phase: "complete",
+        })
+
+        return result.result
       },
     })
+  }
+
+  return tools
+}
+
+export const llmAdapter: LlmAdapter = {
+  streamResponse({ agent, callId, messages, signal, toolsContext }) {
+    const model = gatewayModelFor(agent)
+    let resolveUsage!: (usage: TokenUsage) => void
+    const usage = new Promise<TokenUsage>((resolve) => {
+      resolveUsage = resolve
+    })
+
+    async function* generate() {
+      try {
+        const tools =
+          toolsContext && toolsContext.tools.length > 0
+            ? await buildToolSet(agent, toolsContext, signal)
+            : undefined
+
+        const result = streamText({
+          model,
+          system:
+            agent.model?.systemPrompt ??
+            "You are a concise, helpful voice assistant. Keep replies natural and brief for a phone call.",
+          messages,
+          tools,
+          stopWhen: tools
+            ? stepCountIs(toolsContext?.maxSteps ?? 5)
+            : undefined,
+          maxRetries: Number(process.env.AI_GATEWAY_MAX_RETRIES ?? 0),
+          abortSignal: signal,
+          providerOptions: {
+            gateway: {
+              user: callId,
+              tags: ["feature:voice-relay"],
+            },
+          },
+        })
+
+        void Promise.resolve(result.usage)
+          .then(normalizeUsage)
+          .then(resolveUsage)
+          .catch(() => resolveUsage({}))
+
+        for await (const token of result.textStream) {
+          yield token
+        }
+      } catch (error) {
+        resolveUsage({})
+        throw error
+      }
+    }
+
     return {
       model,
-      textStream: result.textStream,
-      usage: Promise.resolve(result.usage).then(normalizeUsage),
+      textStream: generate(),
+      usage,
     }
   },
 

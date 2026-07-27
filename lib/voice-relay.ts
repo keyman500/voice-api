@@ -269,41 +269,14 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
   )
   .post(
     "/agents",
-    async ({ authed, body }) =>
-      await getVoiceRelayService().createAgent(authed.user.id, {
-        voiceEngine: body.voiceEngine,
-        name: body.name,
-        voice: body.voice,
-        model: body.model,
-        firstMessage: body.firstMessage,
-        maxDurationSeconds: body.maxDurationSeconds,
-        backgroundSound: body.backgroundSound,
-        voicemailMessage: body.voicemailMessage,
-        successEvaluationPrompt: body.successEvaluationPrompt,
-        webhookUrl: body.webhookUrl,
-        webhookTimeoutSeconds: body.webhookTimeoutSeconds,
-        webhookSecret: body.webhookSecret,
-        metadata: body.metadata,
-        providerOptions: body.providerOptions,
-      }),
-    {
-      authUser: true,
-      body: s.createAgentBody,
-      response: { 200: s.agentResponse, ...s.standardErrorResponses },
-      detail: { summary: "Create agent", tags: ["Agents"] },
-    }
-  )
-  .patch(
-    "/agents/:id",
-    async ({ authed, params, body, set }) => {
-      const agent = await getVoiceRelayService().updateAgent(
-        authed.user.id,
-        params.id,
-        {
+    async ({ authed, body, set }) => {
+      try {
+        return await getVoiceRelayService().createAgent(authed.user.id, {
           voiceEngine: body.voiceEngine,
           name: body.name,
           voice: body.voice,
           model: body.model,
+          toolIds: body.toolIds,
           firstMessage: body.firstMessage,
           maxDurationSeconds: body.maxDurationSeconds,
           backgroundSound: body.backgroundSound,
@@ -314,13 +287,51 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
           webhookSecret: body.webhookSecret,
           metadata: body.metadata,
           providerOptions: body.providerOptions,
-        }
-      )
-      if (!agent) {
-        set.status = 404
-        return { error: { code: "NOT_FOUND", message: "Agent not found" } }
+        })
+      } catch (error) {
+        return serviceError(error, set)
       }
-      return agent
+    },
+    {
+      authUser: true,
+      body: s.createAgentBody,
+      response: { 200: s.agentResponse, ...s.standardErrorResponses },
+      detail: { summary: "Create agent", tags: ["Agents"] },
+    }
+  )
+  .patch(
+    "/agents/:id",
+    async ({ authed, params, body, set }) => {
+      try {
+        const agent = await getVoiceRelayService().updateAgent(
+          authed.user.id,
+          params.id,
+          {
+            voiceEngine: body.voiceEngine,
+            name: body.name,
+            voice: body.voice,
+            model: body.model,
+            toolIds: body.toolIds,
+            firstMessage: body.firstMessage,
+            maxDurationSeconds: body.maxDurationSeconds,
+            backgroundSound: body.backgroundSound,
+            voicemailMessage: body.voicemailMessage,
+            successEvaluationPrompt: body.successEvaluationPrompt,
+            webhookUrl: body.webhookUrl,
+            webhookTimeoutSeconds: body.webhookTimeoutSeconds,
+            webhookSecret: body.webhookSecret,
+            metadata: body.metadata,
+            providerOptions: body.providerOptions,
+          }
+        )
+        if (!agent) {
+          set.status = 404
+          return { error: { code: "NOT_FOUND", message: "Agent not found" } }
+        }
+        return agent
+      } catch (error) {
+        return serviceError(error, set)
+      }
     },
     {
       authUser: true,
@@ -348,6 +359,158 @@ export const voiceRelay = new Elysia({ name: "voice-relay", prefix: "/v1" })
       params: s.idParam,
       response: { 200: s.okResponse, ...s.standardErrorResponses },
       detail: { summary: "Delete agent", tags: ["Agents"] },
+    }
+  )
+
+  .get(
+    "/tools",
+    async ({ authed, query }) =>
+      await getVoiceRelayService().listTools(authed.user.id, {
+        limit: query.limit,
+        cursor: query.cursor,
+      }),
+    {
+      authUser: true,
+      query: s.listToolsQuery,
+      response: { 200: s.toolListResponse, ...s.standardErrorResponses },
+      detail: {
+        summary: "List tools",
+        description:
+          "Reusable Vapi-style function tools that agents can call via HTTP server URLs during ConversationRelay turns.",
+        tags: ["Tools"],
+      },
+    }
+  )
+  .get(
+    "/tools/:id",
+    async ({ authed, params, set }) => {
+      const tool = await getVoiceRelayService().getTool(
+        authed.user.id,
+        params.id
+      )
+      if (!tool) {
+        set.status = 404
+        return { error: { code: "NOT_FOUND", message: "Tool not found" } }
+      }
+      return tool
+    },
+    {
+      authUser: true,
+      params: s.idParam,
+      response: { 200: s.toolResponse, ...s.standardErrorResponses },
+      detail: { summary: "Get tool", tags: ["Tools"] },
+    }
+  )
+  .post(
+    "/tools",
+    async ({ authed, body, set }) => {
+      try {
+        return await getVoiceRelayService().createTool(authed.user.id, {
+          type: body.type,
+          name: body.name,
+          description: body.description,
+          function: body.function,
+          server: body.server,
+          messages: body.messages,
+          async: body.async,
+          metadata: body.metadata,
+          providerOptions: body.providerOptions,
+        })
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      body: s.createToolBody,
+      response: { 200: s.toolResponse, ...s.standardErrorResponses },
+      detail: {
+        summary: "Create tool",
+        description:
+          "Create a custom function tool. When attached to an agent via toolIds, the model can invoke it and Voice API POSTs a Vapi-compatible tool-calls payload to server.url.",
+        tags: ["Tools"],
+      },
+    }
+  )
+  .patch(
+    "/tools/:id",
+    async ({ authed, params, body, set }) => {
+      try {
+        const tool = await getVoiceRelayService().updateTool(
+          authed.user.id,
+          params.id,
+          {
+            type: body.type,
+            name: body.name,
+            description: body.description,
+            function: body.function,
+            server: body.server,
+            messages: body.messages,
+            async: body.async,
+            metadata: body.metadata,
+            providerOptions: body.providerOptions,
+          }
+        )
+        if (!tool) {
+          set.status = 404
+          return { error: { code: "NOT_FOUND", message: "Tool not found" } }
+        }
+        return tool
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      params: s.idParam,
+      body: s.updateToolBody,
+      response: { 200: s.toolResponse, ...s.standardErrorResponses },
+      detail: { summary: "Update tool", tags: ["Tools"] },
+    }
+  )
+  .delete(
+    "/tools/:id",
+    async ({ authed, params, set }) => {
+      const ok = await getVoiceRelayService().deleteTool(
+        authed.user.id,
+        params.id
+      )
+      if (!ok) {
+        set.status = 404
+        return { error: { code: "NOT_FOUND", message: "Tool not found" } }
+      }
+      return { ok: true as const }
+    },
+    {
+      authUser: true,
+      params: s.idParam,
+      response: { 200: s.okResponse, ...s.standardErrorResponses },
+      detail: { summary: "Delete tool", tags: ["Tools"] },
+    }
+  )
+  .post(
+    "/tools/:id/test",
+    async ({ authed, params, body, set }) => {
+      try {
+        return await getVoiceRelayService().testTool(authed.user.id, params.id, {
+          arguments: body.arguments,
+          callId: body.callId,
+        })
+      } catch (error) {
+        return serviceError(error, set)
+      }
+    },
+    {
+      authUser: true,
+      params: s.idParam,
+      body: s.testToolBody,
+      response: { 200: s.toolTestResponse, ...s.standardErrorResponses },
+      detail: {
+        summary: "Test tool",
+        description:
+          "Invoke a tool's server URL with sample arguments without placing a phone call. Useful for verifying webhook handlers.",
+        tags: ["Tools"],
+      },
     }
   )
 
