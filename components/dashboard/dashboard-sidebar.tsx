@@ -18,6 +18,7 @@ import {
   RiRobot2Line,
   RiSettings3Line,
   RiSunLine,
+  RiToolsLine,
 } from "@remixicon/react"
 
 import {
@@ -71,6 +72,12 @@ const mainNav: NavItem[] = [
     href: "/dashboard/agents",
     label: "Agents",
     icon: RiRobot2Line,
+    match: "prefix",
+  },
+  {
+    href: "/dashboard/tools",
+    label: "Tools",
+    icon: RiToolsLine,
     match: "prefix",
   },
   {

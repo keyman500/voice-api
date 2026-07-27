@@ -78,6 +78,7 @@ type AgentFormValues = {
   modelName: string
   systemPrompt: string
   knowledgeBaseIds: string
+  toolIds: string
   firstMessage: string
   maxDurationSeconds: string
   backgroundSound: string
@@ -99,6 +100,7 @@ const defaultValues: AgentFormValues = {
   modelName: "",
   systemPrompt: "",
   knowledgeBaseIds: "",
+  toolIds: "",
   firstMessage: "",
   maxDurationSeconds: "",
   backgroundSound: "",
@@ -264,6 +266,7 @@ function valuesFromAgent(agent?: JsonAgent | null): AgentFormValues {
     modelName: agent.model?.model ?? "",
     systemPrompt: agent.model?.systemPrompt ?? "",
     knowledgeBaseIds: agent.model?.knowledgeBaseIds?.join("\n") ?? "",
+    toolIds: agent.toolIds?.join("\n") ?? "",
     firstMessage: agent.firstMessage ?? "",
     maxDurationSeconds: agent.maxDurationSeconds
       ? String(agent.maxDurationSeconds)
@@ -323,6 +326,7 @@ function toPayload(values: AgentFormValues) {
     "Provider options"
   )
   const knowledgeBaseIds = parseListInput(values.knowledgeBaseIds)
+  const toolIds = parseListInput(values.toolIds)
 
   return {
     voiceEngine: values.voiceEngine,
@@ -342,6 +346,7 @@ function toPayload(values: AgentFormValues) {
             knowledgeBaseIds,
           }
         : undefined,
+    toolIds,
     firstMessage: values.firstMessage.trim() || undefined,
     maxDurationSeconds: values.maxDurationSeconds
       ? Number(values.maxDurationSeconds)
@@ -833,6 +838,19 @@ function AgentForm({
                   placeholder="One ID per line"
                   {...form.register("knowledgeBaseIds")}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tool-ids">Tool IDs</Label>
+                <Textarea
+                  id="tool-ids"
+                  placeholder="One tool ID per line (from Dashboard → Tools)"
+                  {...form.register("toolIds")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  ConversationRelay agents can invoke these tools mid-call via
+                  your configured server URLs.
+                </p>
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
