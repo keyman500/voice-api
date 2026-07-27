@@ -168,6 +168,31 @@ export const twilioConfig = pgTable("twilio_config", {
     .notNull(),
 })
 
+export const telnyxConfig = pgTable("telnyx_config", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  encryptedApiKey: text("encrypted_api_key").notNull(),
+  encryptedPublicKey: text("encrypted_public_key"),
+  accountSid: text("account_sid").notNull(),
+  applicationSid: text("application_sid").notNull(),
+  defaultFromNumber: text("default_from_number"),
+  defaultWebhookBaseUrl: text("default_webhook_base_url"),
+  deleteTelnyxRecordingAfterBlobUpload: boolean(
+    "delete_telnyx_recording_after_blob_upload"
+  )
+    .default(false)
+    .notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+})
+
 export const voiceAgent = pgTable(
   "voice_agent",
   {
@@ -228,6 +253,9 @@ export const voiceCall = pgTable(
     livekitSipTrunkId: text("livekit_sip_trunk_id"),
     twilioCallSid: text("twilio_call_sid"),
     twilioAccountSid: text("twilio_account_sid"),
+    telnyxCallSid: text("telnyx_call_sid"),
+    telnyxAccountSid: text("telnyx_account_sid"),
+    telephonyProvider: text("telephony_provider"),
     relaySessionId: text("relay_session_id"),
     voiceEngine: text("voice_engine").default("conversation-relay").notNull(),
     realtimeModel: text("realtime_model"),
@@ -245,6 +273,7 @@ export const voiceCall = pgTable(
     postCallWorkflowRunId: text("post_call_workflow_run_id"),
     recordingIngestedAt: timestamp("recording_ingested_at"),
     recordingDeletedFromTwilioAt: timestamp("recording_deleted_from_twilio_at"),
+    recordingDeletedFromTelnyxAt: timestamp("recording_deleted_from_telnyx_at"),
     recordingIngestionError: text("recording_ingestion_error"),
     analysisStatus: text("analysis_status"),
     analysisError: text("analysis_error"),
@@ -307,6 +336,9 @@ export const voicePhoneNumber = pgTable(
     livekitSipOutboundTrunkId: text("livekit_sip_outbound_trunk_id"),
     twilioPhoneNumberSid: text("twilio_phone_number_sid"),
     twilioAccountSid: text("twilio_account_sid"),
+    telnyxPhoneNumberId: text("telnyx_phone_number_id"),
+    telnyxAccountSid: text("telnyx_account_sid"),
+    telephonyProvider: text("telephony_provider"),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
     providerOptions: jsonb("provider_options").$type<Record<
       string,

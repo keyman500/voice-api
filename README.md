@@ -6,11 +6,12 @@ Voice API is **source-available** under the [Voice API License](./LICENSE.md). Y
 
 ## Features
 
-- **REST-first API** — agents, calls, call logs, recordings, phone numbers, and Twilio configuration under `/api/v1/*`
+- **REST-first API** — agents, calls, call logs, recordings, phone numbers, and Twilio/Telnyx configuration under `/api/v1/*`
 - **Twilio ConversationRelay** — real-time voice relay with WebSocket support for local development
+- **Telnyx BYOK** — bring-your-own Telnyx credentials as an alternative telephony provider alongside Twilio
 - **LiveKit integration** — optional SIP outbound and room-based voice workflows
 - **Typed SDK compatibility** — response shapes aligned with [`keyman500/voice-ai-sdk`](https://github.com/keyman500/voice-ai-sdk)
-- **Bring your own keys** — Twilio, LiveKit, and AI provider credentials stored per user
+- **Bring your own keys** — Twilio, Telnyx, LiveKit, and AI provider credentials stored per user
 - **Auth & API keys** — [Better Auth](https://www.better-auth.com) sessions plus API key issuance for programmatic access
 - **Billing** — Polar-powered subscriptions and usage-based Voice AI credits
 - **Developer dashboard** — manage agents, calls, phone numbers, API keys, and settings
@@ -35,7 +36,7 @@ Next.js App Router
 | Database | [Drizzle ORM](https://orm.drizzle.team) + PostgreSQL (Neon) |
 | Auth | [Better Auth](https://www.better-auth.com) + API keys |
 | Client | [Eden Treaty](https://elysiajs.com/eden/overview) + [TanStack Query](https://tanstack.com/query) |
-| Voice | Twilio ConversationRelay, LiveKit, Vercel AI Gateway |
+| Voice | Twilio ConversationRelay, Telnyx TeXML, LiveKit, Vercel AI Gateway |
 
 ## Quick start
 
@@ -43,7 +44,7 @@ Next.js App Router
 
 - [Bun](https://bun.sh) (or Node.js 20+)
 - PostgreSQL database (e.g. [Neon](https://neon.tech))
-- Twilio account (for ConversationRelay voice calls)
+- Twilio and/or Telnyx account (for voice calls; configure either in Settings)
 
 ### Setup
 
@@ -62,7 +63,7 @@ Fill in the required values in `.env.local`:
 | `BETTER_AUTH_SECRET` | Yes | At least 32-character random secret |
 | `BETTER_AUTH_URL` | Yes | Base URL of the app (e.g. `http://localhost:3000`) |
 
-See [`.env.example`](./.env.example) for optional integrations (Polar billing, Vercel Blob, AI Gateway, Twilio, LiveKit).
+See [`.env.example`](./.env.example) for optional integrations (Polar billing, Vercel Blob, AI Gateway, Twilio, Telnyx, LiveKit).
 
 ### Database
 

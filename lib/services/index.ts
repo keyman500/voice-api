@@ -12,6 +12,9 @@ export type {
   LiveKitCredentials,
   PaginatedList,
   RedactedLiveKitConfig,
+  RedactedTelnyxConfig,
+  TelnyxCredentials,
+  TelephonyProvider,
 } from "./voice-types"
 
 export {

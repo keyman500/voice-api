@@ -8,6 +8,7 @@ import {
   type LlmStreamResponse,
 } from "./llm-adapter"
 import { twilioAdapter, type TwilioAdapter } from "./twilio-adapter"
+import { telnyxAdapter, type TelnyxAdapter } from "./telnyx-adapter"
 import {
   creditsForRuntime,
   creditsForTokenUsage,
@@ -20,7 +21,9 @@ import type {
   JsonCall,
   JsonPhoneNumber,
   PaginatedList,
+  RedactedTelnyxConfig,
   RedactedTwilioConfig,
+  TelephonyProvider,
 } from "./voice-types"
 import {
   REALTIME_MAX_DURATION_SECONDS,
@@ -115,6 +118,7 @@ function publicBaseUrl(input?: string) {
   const value =
     input ??
     process.env.TWILIO_WEBHOOK_BASE_URL ??
+    process.env.TELNYX_WEBHOOK_BASE_URL ??
     process.env.BETTER_AUTH_URL ??
     "http://localhost:3000"
   return value.replace(/\/+$/, "")
@@ -268,13 +272,22 @@ function relayOptions(
   }
 }
 
-function realtimeOptions(agent: JsonAgent, callId: string, baseUrl?: string) {
+function realtimeOptions(
+  agent: JsonAgent,
+  callId: string,
+  baseUrl?: string,
+  telephonyProvider: TelephonyProvider = "twilio"
+) {
   const token = createVoiceRelayToken({ callId })
+  const recordingPath =
+    telephonyProvider === "telnyx"
+      ? `/api/v1/telnyx/recording?callId=${encodeURIComponent(callId)}`
+      : `/api/v1/twilio/recording?callId=${encodeURIComponent(callId)}`
   return {
     // Twilio Media Streams discard query strings from the <Stream> URL.
     // Keep the signed credentials in path segments so they survive the handshake.
     websocketUrl: `${wsBaseUrl(baseUrl)}/api/v1/realtime/ws/${encodeURIComponent(callId)}/${encodeURIComponent(token)}`,
-    recordingStatusCallbackUrl: `${publicBaseUrl(baseUrl)}/api/v1/twilio/recording?callId=${encodeURIComponent(callId)}`,
+    recordingStatusCallbackUrl: `${publicBaseUrl(baseUrl)}${recordingPath}`,
     customParameters: {
       callId,
       agentId: agent.id,
@@ -285,19 +298,45 @@ function realtimeOptions(agent: JsonAgent, callId: string, baseUrl?: string) {
 
 export type VoiceRelayService = ReturnType<typeof createVoiceRelayService>
 
+function asTelephonyProvider(value: unknown): TelephonyProvider | undefined {
+  return value === "twilio" || value === "telnyx" ? value : undefined
+}
+
 export function createVoiceRelayService(
   repo: VoiceRepository = createVoiceRepository(),
   twilio: TwilioAdapter = twilioAdapter,
   llm: LlmAdapter = getLlmAdapter(),
   files: FileStorage = getFileStorage(),
-  billing: BillingService = getBillingService()
+  billing: BillingService = getBillingService(),
+  telnyx: TelnyxAdapter = telnyxAdapter
 ) {
   const activeGenerations = new Map<string, AbortController>()
   const recentFinalPrompts = new Map<string, { text: string; at: number }>()
 
+  async function resolveTelephonyProvider(
+    userId: string,
+    input: {
+      requested?: unknown
+      phoneProvider?: unknown
+    }
+  ): Promise<TelephonyProvider> {
+    const explicit =
+      asTelephonyProvider(input.requested) ??
+      asTelephonyProvider(input.phoneProvider)
+    if (explicit) return explicit
+
+    const [twilioCredentials, telnyxCredentials] = await Promise.all([
+      repo.resolveTwilioCredentials(userId),
+      repo.resolveTelnyxCredentials(userId),
+    ])
+    if (telnyxCredentials && !twilioCredentials) return "telnyx"
+    return "twilio"
+  }
+
   async function resolveWebhookCall(input: {
     callId?: string
     params: Record<string, string>
+    provider?: TelephonyProvider
   }) {
     const explicitCallId = input.callId ?? callbackCallId(input.params)
     if (explicitCallId) {
@@ -306,12 +345,21 @@ export function createVoiceRelayService(
       return {
         call: null,
         callId: explicitCallId,
-        userId: process.env.TWILIO_WEBHOOK_USER_ID,
+        userId:
+          input.provider === "telnyx"
+            ? process.env.TELNYX_WEBHOOK_USER_ID
+            : process.env.TWILIO_WEBHOOK_USER_ID,
       }
     }
-    const twilioCallSid = callbackTwilioCallSid(input.params)
-    if (!twilioCallSid) return null
-    const found = await repo.findCallByTwilioCallSid(twilioCallSid)
+    const callSid = callbackTwilioCallSid(input.params)
+    if (!callSid) return null
+    if (input.provider === "telnyx") {
+      const found = await repo.findCallByTelnyxCallSid(callSid)
+      return found
+        ? { call: found, callId: found.id, userId: found.userId }
+        : null
+    }
+    const found = await repo.findCallByTwilioCallSid(callSid)
     return found
       ? { call: found, callId: found.id, userId: found.userId }
       : null
@@ -372,6 +420,41 @@ export function createVoiceRelayService(
         )
       }
       await twilio.testCredentials(credentials)
+      return { ok: true as const, providerSource: credentials.source }
+    },
+
+    async getTelnyxConfig(userId: string): Promise<RedactedTelnyxConfig> {
+      return repo.getTelnyxConfig(userId)
+    },
+
+    async upsertTelnyxConfig(
+      userId: string,
+      input: {
+        apiKey: string
+        publicKey?: string
+        accountSid: string
+        applicationSid: string
+        defaultFromNumber?: string
+        deleteTelnyxRecordingAfterBlobUpload?: boolean
+      }
+    ) {
+      return repo.upsertTelnyxConfig(userId, input)
+    },
+
+    async deleteTelnyxConfig(userId: string) {
+      return repo.deleteTelnyxConfig(userId)
+    },
+
+    async testTelnyxConfig(userId: string) {
+      const credentials = await repo.resolveTelnyxCredentials(userId)
+      if (!credentials) {
+        throw new VoiceServiceError(
+          400,
+          "TELNYX_CONFIG_MISSING",
+          "No user Telnyx config or platform Telnyx fallback is configured"
+        )
+      }
+      await telnyx.testCredentials(credentials)
       return { ok: true as const, providerSource: credentials.source }
     },
 
@@ -543,6 +626,113 @@ export function createVoiceRelayService(
           "Selected phone number does not have a callable number"
         )
       }
+      const telephonyProvider = await resolveTelephonyProvider(userId, {
+        requested: input.providerOptions?.telephonyProvider,
+        phoneProvider: phone?.telephonyProvider,
+      })
+
+      if (telephonyProvider === "telnyx") {
+        const credentials = await repo.resolveTelnyxCredentials(userId)
+        if (!credentials) {
+          throw new VoiceServiceError(
+            400,
+            "TELNYX_CONFIG_MISSING",
+            "No user Telnyx config or platform Telnyx fallback is configured"
+          )
+        }
+        const fromNumber =
+          phone?.number ?? input.fromNumber ?? credentials.defaultFromNumber
+        if (!fromNumber) {
+          throw new VoiceServiceError(
+            400,
+            "TELNYX_FROM_NUMBER_REQUIRED",
+            "A Telnyx from number is required"
+          )
+        }
+        const baseUrl =
+          providerOptionString(input.providerOptions, "webhookBaseUrl") ??
+          credentials.defaultWebhookBaseUrl
+        const call = await repo.createCall(userId, {
+          id: crypto.randomUUID(),
+          userId,
+          agentId: input.agentId,
+          direction: "outbound",
+          status: "queued",
+          voiceEngine: agent?.voiceEngine ?? "conversation-relay",
+          realtimeModel:
+            agent?.voiceEngine === "realtime" ? agent.model?.model : undefined,
+          transcriptionStatus:
+            agent?.voiceEngine === "realtime" ? "pending" : undefined,
+          postCallStatus: "pending",
+          analysisStatus: "pending",
+          successEvaluationStatus: "pending",
+          webhookDeliveryStatus: "pending",
+          toNumber: input.toNumber,
+          fromNumber,
+          phoneNumberId: phone?.id,
+          telephonyProvider: "telnyx",
+          providerSource: credentials.source,
+          metadata: input.metadata ?? null,
+          providerOptions: input.providerOptions ?? null,
+          raw: {
+            resolvedPhoneNumber: phone
+              ? {
+                  id: phone.id,
+                  number: phone.number,
+                  telnyxPhoneNumberId: phone.telnyxPhoneNumberId,
+                }
+              : undefined,
+          },
+        })
+        await repo.addCallEvent(userId, call.id, "call.queued", {
+          toNumber: input.toNumber,
+          fromNumber,
+          phoneNumberId: phone?.id,
+          telephonyProvider: "telnyx",
+        })
+        try {
+          const root = publicBaseUrl(baseUrl)
+          const created = await telnyx.createCall(credentials, {
+            to: input.toNumber,
+            from: fromNumber,
+            voiceUrl: `${root}/api/v1/telnyx/voice?callId=${encodeURIComponent(call.id)}`,
+            statusCallbackUrl: `${root}/api/v1/telnyx/status?callId=${encodeURIComponent(call.id)}`,
+            recordingStatusCallbackUrl: `${root}/api/v1/telnyx/recording?callId=${encodeURIComponent(call.id)}`,
+            record: boolFrom(input.providerOptions?.record) ?? true,
+          })
+          await repo.addCallEvent(userId, call.id, "telnyx.call.created", {
+            telnyxCallSid: created.sid,
+            status: created.status,
+          })
+          return (
+            (await repo.updateCall(userId, call.id, {
+              status:
+                normalizeStatus(created.status) === "unknown"
+                  ? "ringing"
+                  : normalizeStatus(created.status),
+              telnyxCallSid: created.sid,
+              telnyxAccountSid: created.accountSid ?? credentials.accountSid,
+              telephonyProvider: "telnyx",
+              providerSource: credentials.source,
+              raw: { telnyx: { call: created.raw } },
+            })) ?? call
+          )
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Telnyx request failed"
+          await repo.addCallEvent(userId, call.id, "call.error", {
+            code: "TELNYX_REQUEST_FAILED",
+            message,
+          })
+          await repo.updateCall(userId, call.id, {
+            status: "error",
+            endedAt: new Date(),
+            raw: { error: message },
+          })
+          throw new VoiceServiceError(502, "TELNYX_REQUEST_FAILED", message)
+        }
+      }
+
       const credentials = await repo.resolveTwilioCredentials(userId)
       if (!credentials) {
         throw new VoiceServiceError(
@@ -581,6 +771,7 @@ export function createVoiceRelayService(
         toNumber: input.toNumber,
         fromNumber,
         phoneNumberId: phone?.id,
+        telephonyProvider: "twilio",
         providerSource: credentials.source,
         metadata: input.metadata ?? null,
         providerOptions: input.providerOptions ?? null,
@@ -598,6 +789,7 @@ export function createVoiceRelayService(
         toNumber: input.toNumber,
         fromNumber,
         phoneNumberId: phone?.id,
+        telephonyProvider: "twilio",
       })
       try {
         const root = publicBaseUrl(baseUrl)
@@ -621,6 +813,7 @@ export function createVoiceRelayService(
                 : normalizeStatus(created.status),
             twilioCallSid: created.sid,
             twilioAccountSid: created.accountSid ?? credentials.accountSid,
+            telephonyProvider: "twilio",
             providerSource: credentials.source,
             raw: { twilio: { call: created.raw } },
           })) ?? call
@@ -679,7 +872,125 @@ export function createVoiceRelayService(
       return repo.getPhoneNumber(userId, id)
     },
 
-    async importPhoneNumbers(userId: string) {
+    async importPhoneNumbers(
+      userId: string,
+      input: { telephonyProvider?: TelephonyProvider } = {}
+    ) {
+      const telephonyProvider = await resolveTelephonyProvider(userId, {
+        requested: input.telephonyProvider,
+      })
+
+      if (telephonyProvider === "telnyx") {
+        const credentials = await repo.resolveTelnyxCredentials(userId)
+        if (!credentials) {
+          throw new VoiceServiceError(
+            400,
+            "TELNYX_CONFIG_MISSING",
+            "No user Telnyx config or platform Telnyx fallback is configured"
+          )
+        }
+        const root = publicBaseUrl(credentials.defaultWebhookBaseUrl)
+        const voiceUrl = `${root}/api/v1/telnyx/voice`
+        let incoming
+        try {
+          incoming = await telnyx.listIncomingPhoneNumbers(credentials)
+        } catch (error) {
+          throw new VoiceServiceError(
+            502,
+            "TELNYX_PHONE_NUMBER_IMPORT_FAILED",
+            error instanceof Error
+              ? error.message
+              : "Failed to import Telnyx phone numbers"
+          )
+        }
+        const existing = await repo.listPhoneNumbers(userId, { limit: 500 })
+        const existingById = new Map(
+          existing.items
+            .filter((phone) => phone.telnyxPhoneNumberId)
+            .map((phone) => [phone.telnyxPhoneNumberId, phone])
+        )
+        const existingByNumber = new Map(
+          existing.items
+            .filter((phone) => phone.number)
+            .map((phone) => [phone.number, phone])
+        )
+        const imported: JsonPhoneNumber[] = []
+        for (const remote of incoming) {
+          let webhook:
+            | {
+                status: "configured"
+                connectionId?: string
+                voiceUrl?: string
+                syncedAt: string
+              }
+            | { status: "failed"; error: string }
+          try {
+            const updated = await telnyx.updateIncomingPhoneNumberConnection(
+              credentials,
+              {
+                id: remote.id,
+                connectionId: credentials.applicationSid,
+              }
+            )
+            webhook = {
+              status: "configured",
+              connectionId: updated.connectionId ?? credentials.applicationSid,
+              voiceUrl,
+              syncedAt: new Date().toISOString(),
+            }
+          } catch (error) {
+            webhook = {
+              status: "failed",
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Telnyx connection update failed",
+            }
+          }
+
+          const current =
+            existingById.get(remote.id) ??
+            existingByNumber.get(remote.phoneNumber)
+          const providerOptions = {
+            ...(current?.providerOptions ?? {}),
+            telnyxPhoneNumberId: remote.id,
+            telnyxAccountSid: remote.accountSid ?? credentials.accountSid,
+            telephonyProvider: "telnyx" as const,
+            webhook,
+            importedFromTelnyxAt: new Date().toISOString(),
+          }
+          const raw = {
+            ...(current?.raw && typeof current.raw === "object"
+              ? (current.raw as Record<string, unknown>)
+              : {}),
+            telnyx: remote.raw,
+            webhook,
+          }
+          const phoneInput = {
+            name: current?.name ?? remote.friendlyName,
+            number: remote.phoneNumber,
+            inboundAgentId: current?.inboundAgentId,
+            outboundAgentId: current?.outboundAgentId,
+            webhookUrl: voiceUrl,
+            areaCode: current?.areaCode,
+            telnyxPhoneNumberId: remote.id,
+            telnyxAccountSid: remote.accountSid ?? credentials.accountSid,
+            telephonyProvider: "telnyx" as const,
+            providerOptions,
+            raw,
+          }
+          const saved = current
+            ? await repo.updatePhoneNumber(userId, current.id, phoneInput)
+            : await repo.createPhoneNumber(userId, phoneInput)
+          if (saved) imported.push(saved)
+        }
+        return {
+          items: imported,
+          hasMore: false as const,
+          imported: imported.length,
+        }
+      }
+
       const credentials = await repo.resolveTwilioCredentials(userId)
       if (!credentials) {
         throw new VoiceServiceError(
@@ -762,6 +1073,7 @@ export function createVoiceRelayService(
           ...(current?.providerOptions ?? {}),
           twilioPhoneNumberSid: remote.sid,
           twilioAccountSid: remote.accountSid ?? credentials.accountSid,
+          telephonyProvider: "twilio" as const,
           webhook,
           importedFromTwilioAt: new Date().toISOString(),
         }
@@ -772,7 +1084,7 @@ export function createVoiceRelayService(
           twilio: remote.raw,
           webhook,
         }
-        const input = {
+        const phoneInput = {
           name: current?.name ?? remote.friendlyName,
           number: remote.phoneNumber,
           inboundAgentId: current?.inboundAgentId,
@@ -781,12 +1093,13 @@ export function createVoiceRelayService(
           areaCode: current?.areaCode,
           twilioPhoneNumberSid: remote.sid,
           twilioAccountSid: remote.accountSid ?? credentials.accountSid,
+          telephonyProvider: "twilio" as const,
           providerOptions,
           raw,
         }
         const saved = current
-          ? await repo.updatePhoneNumber(userId, current.id, input)
-          : await repo.createPhoneNumber(userId, input)
+          ? await repo.updatePhoneNumber(userId, current.id, phoneInput)
+          : await repo.createPhoneNumber(userId, phoneInput)
         if (saved) imported.push(saved)
       }
       return {
@@ -823,6 +1136,17 @@ export function createVoiceRelayService(
           input.providerOptions,
           "twilioAccountSid"
         ),
+        telnyxPhoneNumberId: providerOptionString(
+          input.providerOptions,
+          "telnyxPhoneNumberId"
+        ),
+        telnyxAccountSid: providerOptionString(
+          input.providerOptions,
+          "telnyxAccountSid"
+        ),
+        telephonyProvider: asTelephonyProvider(
+          input.providerOptions?.telephonyProvider
+        ),
         providerOptions: input.providerOptions ?? null,
         raw: {},
       })
@@ -854,6 +1178,17 @@ export function createVoiceRelayService(
         twilioAccountSid: providerOptionString(
           input.providerOptions,
           "twilioAccountSid"
+        ),
+        telnyxPhoneNumberId: providerOptionString(
+          input.providerOptions,
+          "telnyxPhoneNumberId"
+        ),
+        telnyxAccountSid: providerOptionString(
+          input.providerOptions,
+          "telnyxAccountSid"
+        ),
+        telephonyProvider: asTelephonyProvider(
+          input.providerOptions?.telephonyProvider
         ),
       })
     },
@@ -892,6 +1227,221 @@ export function createVoiceRelayService(
           signature: input.signature,
         })
       )
+    },
+
+    async validateTelnyxWebhook(input: {
+      userId: string
+      rawBody: string
+      signature?: string | null
+      timestamp?: string | null
+    }) {
+      const credentials = await repo.resolveTelnyxCredentials(input.userId)
+      if (!credentials) return false
+      if (!credentials.publicKey) {
+        // Allow BYOK setups that have not uploaded a public key yet.
+        // Signature verification becomes required once a public key is stored.
+        return true
+      }
+      return telnyx.validateSignature({
+        publicKey: credentials.publicKey,
+        rawBody: input.rawBody,
+        signature: input.signature,
+        timestamp: input.timestamp,
+      })
+    },
+
+    async handleTelnyxVoiceWebhook(input: {
+      url: string
+      params: Record<string, string>
+      rawBody: string
+      signature?: string | null
+      timestamp?: string | null
+      callId?: string
+    }) {
+      let call: JsonCall | null = null
+      let userId: string | undefined
+      const existing = input.callId
+        ? await this.findCallForWebhook(input.callId)
+        : null
+      if (existing) {
+        call = existing.call
+        userId = existing.userId
+      }
+      let agent: JsonAgent | null = null
+      let credentialsBaseUrl: string | undefined
+
+      if (!call) {
+        const toNumber = formValue(input.params, "To", "to")
+        if (!toNumber) {
+          throw new VoiceServiceError(
+            400,
+            "TELNYX_TO_MISSING",
+            "Telnyx To is required"
+          )
+        }
+        const phone = await repo.findPhoneNumberByNumber(toNumber)
+        if (!phone) {
+          throw new VoiceServiceError(
+            404,
+            "PHONE_NUMBER_NOT_FOUND",
+            "Phone number not found"
+          )
+        }
+        userId = phone.userId
+        if (
+          !(await this.validateTelnyxWebhook({
+            userId,
+            rawBody: input.rawBody,
+            signature: input.signature,
+            timestamp: input.timestamp,
+          }))
+        ) {
+          throw new VoiceServiceError(
+            401,
+            "TELNYX_SIGNATURE_INVALID",
+            "Invalid Telnyx signature"
+          )
+        }
+        credentialsBaseUrl = (await repo.resolveTelnyxCredentials(userId))
+          ?.defaultWebhookBaseUrl
+        agent = phone.inboundAgentId
+          ? await repo.getAgent(userId, phone.inboundAgentId)
+          : null
+        if (!agent) {
+          return telnyx.sayTeXML(
+            "This phone number is not configured yet. Please try again later."
+          )
+        }
+        try {
+          await billing.assertCanStartCall(userId)
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "An active subscription is required to receive calls"
+          return telnyx.sayTeXML(message)
+        }
+        call = await repo.createCall(userId, {
+          id: crypto.randomUUID(),
+          userId,
+          agentId: phone.inboundAgentId,
+          direction: "inbound",
+          status: "ringing",
+          voiceEngine: agent.voiceEngine,
+          realtimeModel:
+            agent.voiceEngine === "realtime" ? agent.model?.model : undefined,
+          transcriptionStatus:
+            agent.voiceEngine === "realtime" ? "pending" : undefined,
+          postCallStatus: "pending",
+          analysisStatus: "pending",
+          successEvaluationStatus: "pending",
+          webhookDeliveryStatus: "pending",
+          toNumber,
+          fromNumber: formValue(input.params, "From", "from"),
+          phoneNumberId: phone.id,
+          telnyxCallSid: callbackTwilioCallSid(input.params),
+          telnyxAccountSid: formValue(
+            input.params,
+            "AccountSid",
+            "accountSid",
+            "account_sid"
+          ),
+          telephonyProvider: "telnyx",
+          providerSource: "user",
+          metadata: null,
+          providerOptions: null,
+          raw: { telnyx: input.params },
+        })
+        await repo.addCallEvent(
+          userId,
+          call.id,
+          "telnyx.voice.inbound",
+          input.params
+        )
+      } else {
+        if (!userId) {
+          throw new VoiceServiceError(
+            400,
+            "CALL_USER_MISSING",
+            "Call user missing"
+          )
+        }
+        if (
+          !(await this.validateTelnyxWebhook({
+            userId,
+            rawBody: input.rawBody,
+            signature: input.signature,
+            timestamp: input.timestamp,
+          }))
+        ) {
+          throw new VoiceServiceError(
+            401,
+            "TELNYX_SIGNATURE_INVALID",
+            "Invalid Telnyx signature"
+          )
+        }
+        credentialsBaseUrl = (await repo.resolveTelnyxCredentials(userId))
+          ?.defaultWebhookBaseUrl
+        agent = call.agentId ? await repo.getAgent(userId, call.agentId) : null
+      }
+
+      await repo.addCallEvent(userId, call.id, "telnyx.voice.answered", {
+        callSid: callbackTwilioCallSid(input.params),
+      })
+
+      if (agent?.voiceEngine === "realtime") {
+        const options = realtimeOptions(
+          agent,
+          call.id,
+          credentialsBaseUrl,
+          "telnyx"
+        )
+        await repo.updateCall(userId, call.id, {
+          voiceEngine: "realtime",
+          realtimeModel: agent.model?.model,
+          transcriptionStatus: "pending",
+          telephonyProvider: "telnyx",
+          telnyxCallSid:
+            call.telnyxCallSid ?? callbackTwilioCallSid(input.params),
+        })
+        await repo.addCallEvent(
+          userId,
+          call.id,
+          "telnyx.voice.texml.generated",
+          {
+            callSid: callbackTwilioCallSid(input.params),
+            voiceEngine: "realtime",
+            websocketUrl: redactRelayToken(options.websocketUrl),
+          }
+        )
+        return telnyx.streamTeXML({
+          websocketUrl: options.websocketUrl,
+          recordingStatusCallbackUrl: options.recordingStatusCallbackUrl,
+          customParameters: options.customParameters,
+        })
+      }
+
+      const options = relayOptions(agent, call.id, credentialsBaseUrl)
+      await repo.updateCall(userId, call.id, {
+        telephonyProvider: "telnyx",
+        telnyxCallSid:
+          call.telnyxCallSid ?? callbackTwilioCallSid(input.params),
+      })
+      await repo.addCallEvent(userId, call.id, "telnyx.voice.texml.generated", {
+        callSid: callbackTwilioCallSid(input.params),
+        voiceEngine: agent?.voiceEngine ?? "conversation-relay",
+        websocketUrl: redactRelayToken(options.websocketUrl),
+        note: "Telnyx uses TeXML Stream instead of Twilio ConversationRelay",
+      })
+      return telnyx.streamTeXML({
+        websocketUrl: options.websocketUrl,
+        welcomeGreeting: options.welcomeGreeting,
+        recordingStatusCallbackUrl: `${publicBaseUrl(credentialsBaseUrl)}/api/v1/telnyx/recording?callId=${encodeURIComponent(call.id)}`,
+        customParameters: {
+          callId: call.id,
+          agentId: agent?.id,
+        },
+      })
     },
 
     async handleVoiceWebhook(input: {
@@ -1448,56 +1998,133 @@ export function createVoiceRelayService(
       await repo.addCallEvent(input.userId, input.callId, "post_call.started")
 
       try {
-        const credentials = await repo.resolveTwilioCredentials(input.userId)
-        if (!credentials) {
-          throw new VoiceServiceError(
-            400,
-            "TWILIO_CONFIG_MISSING",
-            "Twilio config is required to ingest recording media"
-          )
-        }
+        const telephonyProvider =
+          asTelephonyProvider(call.telephonyProvider) ??
+          (call.telnyxCallSid && !call.twilioCallSid ? "telnyx" : "twilio")
         const recordingSid = call.recordingSid
         if (!recordingSid) {
           throw new VoiceServiceError(
             400,
             "RECORDING_SID_MISSING",
-            "Twilio recording SID is missing"
+            `${telephonyProvider === "telnyx" ? "Telnyx" : "Twilio"} recording SID is missing`
           )
         }
-        const metadata = await twilio.getRecording(credentials, recordingSid)
-        await repo.updateCall(input.userId, input.callId, {
-          recordingStatus: metadata.status ?? call.recordingStatus,
-        })
-        await repo.addCallEvent(
-          input.userId,
-          input.callId,
-          "twilio.recording.metadata",
-          {
-            recordingSid,
-            status: metadata.status,
-            duration: metadata.duration,
+
+        let mediaBytes: Uint8Array
+        let mediaContentType: string
+        let shouldDeleteTwilioRecording = false
+        let shouldDeleteTelnyxRecording = false
+        let twilioCredentials: Awaited<
+          ReturnType<typeof repo.resolveTwilioCredentials>
+        > = null
+        let telnyxCredentials: Awaited<
+          ReturnType<typeof repo.resolveTelnyxCredentials>
+        > = null
+
+        if (telephonyProvider === "telnyx") {
+          telnyxCredentials = await repo.resolveTelnyxCredentials(input.userId)
+          if (!telnyxCredentials) {
+            throw new VoiceServiceError(
+              400,
+              "TELNYX_CONFIG_MISSING",
+              "Telnyx config is required to ingest recording media"
+            )
           }
-        )
-        if (metadata.status && metadata.status !== "completed") {
-          throw new VoiceServiceError(
-            409,
-            "RECORDING_NOT_READY",
-            `Twilio recording is ${metadata.status}`
+          const metadata = await telnyx.getRecording(
+            telnyxCredentials,
+            recordingSid
           )
+          await repo.updateCall(input.userId, input.callId, {
+            recordingStatus: metadata.status ?? call.recordingStatus,
+          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "telnyx.recording.metadata",
+            {
+              recordingSid,
+              status: metadata.status,
+              duration: metadata.duration,
+            }
+          )
+          if (
+            metadata.status &&
+            metadata.status !== "completed" &&
+            metadata.status !== "available"
+          ) {
+            throw new VoiceServiceError(
+              409,
+              "RECORDING_NOT_READY",
+              `Telnyx recording is ${metadata.status}`
+            )
+          }
+          const media = await telnyx.fetchRecordingMedia(
+            telnyxCredentials,
+            recordingSid,
+            { downloadUrl: metadata.downloadUrl }
+          )
+          mediaBytes = await bodyBytes(media.body)
+          mediaContentType = media.contentType
+          shouldDeleteTelnyxRecording =
+            telnyxCredentials.deleteTelnyxRecordingAfterBlobUpload
+        } else {
+          twilioCredentials = await repo.resolveTwilioCredentials(input.userId)
+          if (!twilioCredentials) {
+            throw new VoiceServiceError(
+              400,
+              "TWILIO_CONFIG_MISSING",
+              "Twilio config is required to ingest recording media"
+            )
+          }
+          const metadata = await twilio.getRecording(
+            twilioCredentials,
+            recordingSid
+          )
+          await repo.updateCall(input.userId, input.callId, {
+            recordingStatus: metadata.status ?? call.recordingStatus,
+          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "twilio.recording.metadata",
+            {
+              recordingSid,
+              status: metadata.status,
+              duration: metadata.duration,
+            }
+          )
+          if (metadata.status && metadata.status !== "completed") {
+            throw new VoiceServiceError(
+              409,
+              "RECORDING_NOT_READY",
+              `Twilio recording is ${metadata.status}`
+            )
+          }
+          const media =
+            call.voiceEngine === "realtime"
+              ? await twilio.fetchRecordingMedia(
+                  twilioCredentials,
+                  recordingSid,
+                  {
+                    format: "wav",
+                    channels: 2,
+                  }
+                )
+              : await twilio.fetchRecordingMedia(
+                  twilioCredentials,
+                  recordingSid
+                )
+          mediaBytes = await bodyBytes(media.body)
+          mediaContentType = media.contentType
+          shouldDeleteTwilioRecording =
+            twilioCredentials.deleteTwilioRecordingAfterBlobUpload
         }
-        const media =
-          call.voiceEngine === "realtime"
-            ? await twilio.fetchRecordingMedia(credentials, recordingSid, {
-                format: "wav",
-                channels: 2,
-              })
-            : await twilio.fetchRecordingMedia(credentials, recordingSid)
-        const mediaBytes = await bodyBytes(media.body)
+
         const uploaded = await files.uploadRecording({
           callId: input.callId,
           recordingSid,
           body: mediaBytes,
-          contentType: media.contentType,
+          contentType: mediaContentType,
         })
         const stored = await files.headRecording(uploaded.key)
         await repo.updateCall(input.userId, input.callId, {
@@ -1592,8 +2219,8 @@ export function createVoiceRelayService(
           }
         }
 
-        if (credentials.deleteTwilioRecordingAfterBlobUpload) {
-          await twilio.deleteRecording(credentials, recordingSid)
+        if (shouldDeleteTwilioRecording && twilioCredentials) {
+          await twilio.deleteRecording(twilioCredentials, recordingSid)
           await repo.updateCall(input.userId, input.callId, {
             recordingDeletedFromTwilioAt: new Date(),
           })
@@ -1601,6 +2228,20 @@ export function createVoiceRelayService(
             input.userId,
             input.callId,
             "twilio.recording.deleted",
+            {
+              recordingSid,
+            }
+          )
+        }
+        if (shouldDeleteTelnyxRecording && telnyxCredentials) {
+          await telnyx.deleteRecording(telnyxCredentials, recordingSid)
+          await repo.updateCall(input.userId, input.callId, {
+            recordingDeletedFromTelnyxAt: new Date(),
+          })
+          await repo.addCallEvent(
+            input.userId,
+            input.callId,
+            "telnyx.recording.deleted",
             {
               recordingSid,
             }

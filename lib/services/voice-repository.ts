@@ -12,7 +12,10 @@ import type {
   LiveKitCredentials,
   PaginatedList,
   RedactedLiveKitConfig,
+  RedactedTelnyxConfig,
   RedactedTwilioConfig,
+  TelnyxCredentials,
+  TelephonyProvider,
   TwilioCredentials,
 } from "./voice-types"
 
@@ -130,6 +133,10 @@ function toCall(
     livekitSipTrunkId: row.livekitSipTrunkId ?? undefined,
     twilioCallSid: row.twilioCallSid ?? undefined,
     twilioAccountSid: row.twilioAccountSid ?? undefined,
+    telnyxCallSid: row.telnyxCallSid ?? undefined,
+    telnyxAccountSid: row.telnyxAccountSid ?? undefined,
+    telephonyProvider:
+      (row.telephonyProvider as TelephonyProvider | null) ?? undefined,
     relaySessionId: row.relaySessionId ?? undefined,
     transcriptionStatus:
       (row.transcriptionStatus as JsonCall["transcriptionStatus"]) ?? undefined,
@@ -147,6 +154,7 @@ function toCall(
     postCallWorkflowRunId: row.postCallWorkflowRunId ?? undefined,
     recordingIngestedAt: iso(row.recordingIngestedAt),
     recordingDeletedFromTwilioAt: iso(row.recordingDeletedFromTwilioAt),
+    recordingDeletedFromTelnyxAt: iso(row.recordingDeletedFromTelnyxAt),
     recordingIngestionError: row.recordingIngestionError ?? undefined,
     analysisStatus:
       (row.analysisStatus as JsonCall["analysisStatus"]) ?? undefined,
@@ -189,6 +197,10 @@ function toPhone(
     areaCode: row.areaCode ?? undefined,
     twilioPhoneNumberSid: row.twilioPhoneNumberSid ?? undefined,
     twilioAccountSid: row.twilioAccountSid ?? undefined,
+    telnyxPhoneNumberId: row.telnyxPhoneNumberId ?? undefined,
+    telnyxAccountSid: row.telnyxAccountSid ?? undefined,
+    telephonyProvider:
+      (row.telephonyProvider as TelephonyProvider | null) ?? undefined,
     metadata: row.metadata ?? undefined,
     providerOptions: row.providerOptions ?? undefined,
     raw: row.raw ?? {},
@@ -458,6 +470,146 @@ export function createVoiceRepository() {
       return null
     },
 
+    async getTelnyxConfig(userId: string): Promise<RedactedTelnyxConfig> {
+      const [row] = await db
+        .select()
+        .from(schema.telnyxConfig)
+        .where(eq(schema.telnyxConfig.userId, userId))
+        .limit(1)
+      if (row) {
+        const apiKey = decryptSecret(row.encryptedApiKey)
+        return {
+          configured: true,
+          providerSource: "user",
+          accountSidPrefix: row.accountSid.slice(0, 8),
+          applicationSidPrefix: row.applicationSid.slice(0, 8),
+          apiKeyPrefix: apiKey.slice(0, 8),
+          publicKeyConfigured: Boolean(row.encryptedPublicKey),
+          defaultFromNumber: row.defaultFromNumber ?? undefined,
+          defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+          deleteTelnyxRecordingAfterBlobUpload:
+            row.deleteTelnyxRecordingAfterBlobUpload,
+          updatedAt: iso(row.updatedAt),
+        }
+      }
+      const platformConfigured = Boolean(
+        process.env.TELNYX_API_KEY &&
+          process.env.TELNYX_ACCOUNT_SID &&
+          process.env.TELNYX_APPLICATION_SID
+      )
+      return {
+        configured: platformConfigured,
+        providerSource: platformConfigured ? "platform" : "none",
+        accountSidPrefix: process.env.TELNYX_ACCOUNT_SID?.slice(0, 8),
+        applicationSidPrefix: process.env.TELNYX_APPLICATION_SID?.slice(0, 8),
+        apiKeyPrefix: process.env.TELNYX_API_KEY?.slice(0, 8),
+        publicKeyConfigured: Boolean(process.env.TELNYX_PUBLIC_KEY),
+        defaultFromNumber: process.env.TELNYX_FROM_NUMBER,
+        defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+        deleteTelnyxRecordingAfterBlobUpload:
+          process.env.TELNYX_DELETE_RECORDING_AFTER_BLOB_UPLOAD === "true",
+      }
+    },
+
+    async upsertTelnyxConfig(
+      userId: string,
+      input: {
+        apiKey: string
+        publicKey?: string
+        accountSid: string
+        applicationSid: string
+        defaultFromNumber?: string
+        deleteTelnyxRecordingAfterBlobUpload?: boolean
+      }
+    ): Promise<RedactedTelnyxConfig> {
+      const id = crypto.randomUUID()
+      const updatedAt = now()
+      const encryptedPublicKey =
+        input.publicKey && input.publicKey.length > 0
+          ? encryptSecret(input.publicKey)
+          : null
+      await db
+        .insert(schema.telnyxConfig)
+        .values({
+          id,
+          userId,
+          encryptedApiKey: encryptSecret(input.apiKey),
+          encryptedPublicKey,
+          accountSid: input.accountSid,
+          applicationSid: input.applicationSid,
+          defaultFromNumber: input.defaultFromNumber,
+          deleteTelnyxRecordingAfterBlobUpload:
+            input.deleteTelnyxRecordingAfterBlobUpload ?? false,
+          createdAt: updatedAt,
+          updatedAt,
+        })
+        .onConflictDoUpdate({
+          target: schema.telnyxConfig.userId,
+          set: {
+            encryptedApiKey: encryptSecret(input.apiKey),
+            encryptedPublicKey,
+            accountSid: input.accountSid,
+            applicationSid: input.applicationSid,
+            defaultFromNumber: input.defaultFromNumber,
+            deleteTelnyxRecordingAfterBlobUpload:
+              input.deleteTelnyxRecordingAfterBlobUpload ?? false,
+            updatedAt,
+          },
+        })
+      return this.getTelnyxConfig(userId)
+    },
+
+    async deleteTelnyxConfig(userId: string): Promise<boolean> {
+      const rows = await db
+        .delete(schema.telnyxConfig)
+        .where(eq(schema.telnyxConfig.userId, userId))
+        .returning({ id: schema.telnyxConfig.id })
+      return rows.length > 0
+    },
+
+    async resolveTelnyxCredentials(
+      userId: string
+    ): Promise<TelnyxCredentials | null> {
+      const [row] = await db
+        .select()
+        .from(schema.telnyxConfig)
+        .where(eq(schema.telnyxConfig.userId, userId))
+        .limit(1)
+      if (row) {
+        return {
+          apiKey: decryptSecret(row.encryptedApiKey),
+          publicKey: row.encryptedPublicKey
+            ? decryptSecret(row.encryptedPublicKey)
+            : undefined,
+          accountSid: row.accountSid,
+          applicationSid: row.applicationSid,
+          defaultFromNumber: row.defaultFromNumber ?? undefined,
+          defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+          deleteTelnyxRecordingAfterBlobUpload:
+            row.deleteTelnyxRecordingAfterBlobUpload,
+          source: "user",
+        }
+      }
+      if (
+        process.env.TELNYX_API_KEY &&
+        process.env.TELNYX_ACCOUNT_SID &&
+        process.env.TELNYX_APPLICATION_SID
+      ) {
+        return {
+          apiKey: process.env.TELNYX_API_KEY,
+          publicKey: process.env.TELNYX_PUBLIC_KEY,
+          accountSid: process.env.TELNYX_ACCOUNT_SID,
+          applicationSid: process.env.TELNYX_APPLICATION_SID,
+          defaultFromNumber: process.env.TELNYX_FROM_NUMBER,
+          defaultWebhookBaseUrl: process.env.TELNYX_WEBHOOK_BASE_URL,
+          deleteTelnyxRecordingAfterBlobUpload:
+            process.env.TELNYX_DELETE_RECORDING_AFTER_BLOB_UPLOAD === "true",
+          source: "platform",
+        }
+      }
+      return null
+    },
+
     async createAgent(
       userId: string,
       input: Omit<AgentInsert, "id" | "userId" | "createdAt" | "updatedAt"> & {
@@ -652,6 +804,15 @@ export function createVoiceRepository() {
         .select()
         .from(schema.voiceCall)
         .where(eq(schema.voiceCall.twilioCallSid, twilioCallSid))
+        .limit(1)
+      return row ? toCallWithUser(row) : null
+    },
+
+    async findCallByTelnyxCallSid(telnyxCallSid: string) {
+      const [row] = await db
+        .select()
+        .from(schema.voiceCall)
+        .where(eq(schema.voiceCall.telnyxCallSid, telnyxCallSid))
         .limit(1)
       return row ? toCallWithUser(row) : null
     },

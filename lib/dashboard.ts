@@ -2,12 +2,14 @@ import type {
   PaginatedList,
   JsonAgent,
   JsonCall,
+  RedactedTelnyxConfig,
   RedactedTwilioConfig,
 } from "@/lib/services/voice-types"
 
 export const dashboardQueryKeys = {
   agentsRoot: () => ["agents"] as const,
   livekit: () => ["twilio-config"] as const,
+  telnyx: () => ["telnyx-config"] as const,
   apiKeys: () => ["api-keys"] as const,
   billing: () => ["billing"] as const,
   modelPricing: () => ["billing", "model-pricing"] as const,
@@ -25,6 +27,7 @@ export type PhoneNumberListResponse = PaginatedList<
   import("@/lib/services/voice-types").JsonPhoneNumber
 >
 export type LiveKitConfigResponse = RedactedTwilioConfig
+export type TelnyxConfigResponse = RedactedTelnyxConfig
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

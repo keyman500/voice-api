@@ -54,6 +54,9 @@ export type JsonCall = {
   livekitSipTrunkId?: string
   twilioCallSid?: string
   twilioAccountSid?: string
+  telnyxCallSid?: string
+  telnyxAccountSid?: string
+  telephonyProvider?: TelephonyProvider
   relaySessionId?: string
   transcriptionStatus?: "pending" | "processing" | "ready" | "failed"
   transcriptionModel?: string
@@ -69,6 +72,7 @@ export type JsonCall = {
   postCallWorkflowRunId?: string
   recordingIngestedAt?: string
   recordingDeletedFromTwilioAt?: string
+  recordingDeletedFromTelnyxAt?: string
   recordingIngestionError?: string
   analysisStatus?: "pending" | "processing" | "ready" | "failed"
   analysisError?: string
@@ -113,6 +117,9 @@ export type JsonPhoneNumber = {
   areaCode?: string
   twilioPhoneNumberSid?: string
   twilioAccountSid?: string
+  telnyxPhoneNumberId?: string
+  telnyxAccountSid?: string
+  telephonyProvider?: TelephonyProvider
   metadata?: Record<string, unknown>
   providerOptions?: Record<string, unknown>
   raw: unknown
@@ -164,6 +171,21 @@ export type RedactedTwilioConfig = {
   updatedAt?: string
 }
 
+export type RedactedTelnyxConfig = {
+  configured: boolean
+  providerSource: "user" | "platform" | "none"
+  accountSidPrefix?: string
+  applicationSidPrefix?: string
+  apiKeyPrefix?: string
+  publicKeyConfigured: boolean
+  defaultFromNumber?: string
+  defaultWebhookBaseUrl?: string
+  deleteTelnyxRecordingAfterBlobUpload: boolean
+  updatedAt?: string
+}
+
+export type TelephonyProvider = "twilio" | "telnyx"
+
 export type LiveKitCredentials = {
   url: string
   apiKey: string
@@ -178,5 +200,16 @@ export type TwilioCredentials = {
   defaultFromNumber?: string
   defaultWebhookBaseUrl?: string
   deleteTwilioRecordingAfterBlobUpload: boolean
+  source: "user" | "platform"
+}
+
+export type TelnyxCredentials = {
+  apiKey: string
+  publicKey?: string
+  accountSid: string
+  applicationSid: string
+  defaultFromNumber?: string
+  defaultWebhookBaseUrl?: string
+  deleteTelnyxRecordingAfterBlobUpload: boolean
   source: "user" | "platform"
 }
