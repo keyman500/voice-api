@@ -91,3 +91,18 @@ Next.js App Router
 | `NEXT_PUBLIC_POSTHOG_HOST` | —  | PostHog API host (default `https://us.i.posthog.com`) |
 
 Copy `.env.example` → `.env.local` and fill in values before running.
+
+---
+
+## Cursor Cloud specific instructions
+
+Standard commands live in `package.json` scripts and `README.md`; only the non-obvious cloud caveats are captured here. The startup update script already runs `bun install`.
+
+- **Runtime is Bun**, installed at `~/.bun/bin`. If `bun` is not on `PATH` in a fresh non-login shell, call it via `~/.bun/bin/bun` or `export PATH="$HOME/.bun/bin:$PATH"`.
+- **PostgreSQL runs locally** (installed + started during setup; data persists in the VM snapshot). Start it after a cold boot with `sudo pg_ctlcluster 16 main start`. Local dev DB: `postgresql://postgres:postgres@127.0.0.1:5432/voice_api`.
+- **`.env.local` is gitignored** and already populated with safe local-dev values. After schema changes, apply migrations with `bun run db:migrate` (never `db:push`).
+- **`FILE_STORAGE_PROVIDER=memory` is required for local dev.** Without it (the `.env.example` default is `vercel-blob`), creating agents/calls fails with `vercel/blob adapter: missing credentials`. `memory` avoids needing real Vercel Blob credentials.
+- **Run the app** with `bun run dev` (Next.js + Turbopack on `:3000`). `bun run dev:voice` additionally needs a public ngrok HTTPS tunnel for Twilio ConversationRelay WebSockets and is not required for normal dashboard/API work.
+- **Tests mock the DB and Better Auth** (`bun run test`), so they need no running Postgres. The `failed to read input source map` lines from SWC are harmless noise.
+- **Lint** (`bun run lint`) currently reports many pre-existing `no-unused-vars` warnings but `0 errors`; treat only errors as blocking.
+- Third-party integrations (Polar billing, Twilio, LiveKit, AI Gateway, Vercel Blob) are optional and stay unconfigured locally — core auth + agent/tool/call CRUD works without them.
