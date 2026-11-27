@@ -25,6 +25,8 @@ import type {
 import {
   REALTIME_MAX_DURATION_SECONDS,
   realtimeModel,
+  replaceRetiredRealtimeModel,
+  resolveRealtimeModelId,
   type VoiceEngine,
 } from "./realtime-models"
 import { VoiceServiceError } from "./voice-service"
@@ -71,6 +73,23 @@ function intFrom(value: unknown) {
   return undefined
 }
 
+function resolvedRealtimeAgentFields<
+  T extends {
+    voiceEngine: VoiceEngine
+    model?: JsonAgent["model"]
+    voice?: JsonAgent["voice"]
+  },
+>(input: T): T {
+  if (input.voiceEngine !== "realtime") return input
+  const model = replaceRetiredRealtimeModel(input.model)
+  if (!model || model === input.model) return input
+  const voice =
+    input.voice?.provider === "xai"
+      ? { ...input.voice, provider: model.provider }
+      : input.voice
+  return { ...input, model, voice }
+}
+
 function validateAgentEngine(input: {
   voiceEngine: VoiceEngine
   model?: JsonAgent["model"]
@@ -78,7 +97,8 @@ function validateAgentEngine(input: {
   maxDurationSeconds?: number
 }) {
   if (input.voiceEngine !== "realtime") return
-  const modelId = input.model?.model
+  const model = replaceRetiredRealtimeModel(input.model)
+  const modelId = model?.model
   const capability = realtimeModel(modelId)
   if (!capability) {
     throw new VoiceServiceError(
@@ -88,7 +108,7 @@ function validateAgentEngine(input: {
     )
   }
   if (
-    input.model?.provider !== capability.provider ||
+    model?.provider !== capability.provider ||
     !input.voice?.voiceId ||
     !capability.voices.some((voice) => voice === input.voice?.voiceId)
   ) {
@@ -278,7 +298,7 @@ function realtimeOptions(agent: JsonAgent, callId: string, baseUrl?: string) {
     customParameters: {
       callId,
       agentId: agent.id,
-      model: agent.model?.model,
+      model: resolveRealtimeModelId(agent.model?.model),
     },
   }
 }
@@ -405,17 +425,18 @@ export function createVoiceRelayService(
         providerOptions?: RecordInput
       }
     ) {
-      validateAgentEngine(input)
+      const resolved = resolvedRealtimeAgentFields(input)
+      validateAgentEngine(resolved)
       return repo.createAgent(userId, {
-        voiceEngine: input.voiceEngine,
-        name: input.name,
-        voice: input.voice ?? null,
-        model: input.model ?? null,
+        voiceEngine: resolved.voiceEngine,
+        name: resolved.name,
+        voice: resolved.voice ?? null,
+        model: resolved.model ?? null,
         firstMessage: input.firstMessage,
         maxDurationSeconds:
-          input.voiceEngine === "realtime"
-            ? (input.maxDurationSeconds ?? REALTIME_MAX_DURATION_SECONDS)
-            : input.maxDurationSeconds,
+          resolved.voiceEngine === "realtime"
+            ? (resolved.maxDurationSeconds ?? REALTIME_MAX_DURATION_SECONDS)
+            : resolved.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
         voicemailMessage: input.voicemailMessage,
         successEvaluationPrompt: input.successEvaluationPrompt,
@@ -450,17 +471,24 @@ export function createVoiceRelayService(
     ) {
       const current = await repo.getAgent(userId, id)
       if (!current) return null
-      validateAgentEngine({
+      const resolved = resolvedRealtimeAgentFields({
         voiceEngine: input.voiceEngine ?? current.voiceEngine,
         model: input.model ?? current.model,
         voice: input.voice ?? current.voice,
         maxDurationSeconds: input.maxDurationSeconds,
       })
+      validateAgentEngine(resolved)
       return repo.updateAgent(userId, id, {
         voiceEngine: input.voiceEngine,
         name: input.name,
-        voice: input.voice ?? undefined,
-        model: input.model ?? undefined,
+        voice:
+          input.voice || resolved.voice !== current.voice
+            ? resolved.voice
+            : undefined,
+        model:
+          input.model || resolved.model !== current.model
+            ? resolved.model
+            : undefined,
         firstMessage: input.firstMessage,
         maxDurationSeconds: input.maxDurationSeconds,
         backgroundSound: input.backgroundSound,
@@ -571,7 +599,9 @@ export function createVoiceRelayService(
         status: "queued",
         voiceEngine: agent?.voiceEngine ?? "conversation-relay",
         realtimeModel:
-          agent?.voiceEngine === "realtime" ? agent.model?.model : undefined,
+          agent?.voiceEngine === "realtime"
+            ? resolveRealtimeModelId(agent.model?.model)
+            : undefined,
         transcriptionStatus:
           agent?.voiceEngine === "realtime" ? "pending" : undefined,
         postCallStatus: "pending",
@@ -1075,7 +1105,9 @@ export function createVoiceRelayService(
           status: "ringing",
           voiceEngine: agent.voiceEngine,
           realtimeModel:
-            agent.voiceEngine === "realtime" ? agent.model?.model : undefined,
+            agent.voiceEngine === "realtime"
+              ? resolveRealtimeModelId(agent.model?.model)
+              : undefined,
           transcriptionStatus:
             agent.voiceEngine === "realtime" ? "pending" : undefined,
           postCallStatus: "pending",
@@ -1143,7 +1175,7 @@ export function createVoiceRelayService(
           : { ...configured, recordingStatusCallbackUrl: undefined }
         await repo.updateCall(userId, call.id, {
           voiceEngine: "realtime",
-          realtimeModel: agent.model?.model,
+          realtimeModel: resolveRealtimeModelId(agent.model?.model),
           transcriptionStatus: "pending",
         })
         await repo.addCallEvent(

@@ -1,14 +1,16 @@
 export const REALTIME_MAX_DURATION_SECONDS = 24 * 60
-export const REALTIME_TRANSCRIPTION_MODEL = "xai/grok-stt"
-export const REALTIME_PRICING_VERIFIED_AT = "2026-07-10"
+export const REALTIME_TRANSCRIPTION_MODEL = "spacexai/grok-stt"
+export const REALTIME_PRICING_VERIFIED_AT = "2026-11-27"
+export const RETIRED_GROK_REALTIME_MODEL = "xai/grok-voice-think-fast-1.0"
+export const GROK_REALTIME_MODEL = "spacexai/grok-voice-3.0"
 
 export const REALTIME_MODELS = [
   {
-    model: "xai/grok-voice-think-fast-1.0",
-    provider: "xai",
-    name: "Grok Voice Think Fast",
+    model: GROK_REALTIME_MODEL,
+    provider: "spacexai",
+    name: "Grok Voice 3.0",
     voices: ["ara", "rex", "sal", "eve", "leo"],
-    estimatedProviderUsdPerMinute: 0.05,
+    estimatedProviderUsdPerMinute: 0.08004,
     pricingUnit: "audio-minute",
     audioInputUsdPerToken: null,
     audioOutputUsdPerToken: null,
@@ -82,6 +84,24 @@ export type VoiceEngine = "conversation-relay" | "realtime"
 
 export function realtimeModel(model?: string) {
   return REALTIME_MODELS.find((item) => item.model === model)
+}
+
+export function resolveRealtimeModelId(model?: string | null) {
+  if (model === RETIRED_GROK_REALTIME_MODEL) return GROK_REALTIME_MODEL
+  return model || undefined
+}
+
+export function replaceRetiredRealtimeModel<
+  T extends { provider: string; model: string },
+>(model: T | null | undefined) {
+  if (!model?.model) return model
+  const modelId = resolveRealtimeModelId(model.model)
+  if (!modelId || modelId === model.model) return model
+  return {
+    ...model,
+    model: modelId,
+    provider: realtimeModel(modelId)?.provider ?? model.provider,
+  }
 }
 
 export function realtimeModelsForApi() {

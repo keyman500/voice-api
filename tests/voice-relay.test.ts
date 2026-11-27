@@ -528,10 +528,11 @@ describe("/api/v1 relay routes", () => {
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toMatchObject({
       maxDurationSeconds: 1440,
-      transcriptionModel: "xai/grok-stt",
+      transcriptionModel: "spacexai/grok-stt",
       models: expect.arrayContaining([
         expect.objectContaining({
-          model: "xai/grok-voice-think-fast-1.0",
+          model: "spacexai/grok-voice-3.0",
+          provider: "spacexai",
         }),
       ]),
     })
