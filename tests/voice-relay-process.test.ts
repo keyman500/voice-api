@@ -1691,4 +1691,62 @@ describe("voice relay service process behavior", () => {
       recordingIngestionError: "blob down",
     })
   })
+
+  it("stores Grok Voice 3.0 when creating or updating a retired realtime agent", async () => {
+    const { repo } = createProcessRepo()
+    const service = createVoiceRelayService(
+      repo as never,
+      createTwilioMock() as never,
+      createLlmMock() as never,
+      createFilesMock() as never
+    )
+    const retired = {
+      provider: "xai",
+      model: "xai/grok-voice-think-fast-1.0",
+      systemPrompt: "Be brief.",
+    }
+
+    await service.createAgent(fakeUser.id, {
+      voiceEngine: "realtime",
+      name: "Demo",
+      voice: { voiceId: "eve", provider: "xai" },
+      model: retired,
+    })
+
+    expect(repo.createAgent).toHaveBeenCalledWith(
+      fakeUser.id,
+      expect.objectContaining({
+        model: {
+          provider: "spacexai",
+          model: "spacexai/grok-voice-3.0",
+          systemPrompt: "Be brief.",
+        },
+        voice: { voiceId: "eve", provider: "spacexai" },
+      })
+    )
+
+    await repo.createAgent(fakeUser.id, {
+      id: "agent-old",
+      voiceEngine: "realtime",
+      voice: { voiceId: "ara", provider: "xai" },
+      model: {
+        provider: "xai",
+        model: "xai/grok-voice-think-fast-1.0",
+      },
+    })
+    await service.updateAgent(fakeUser.id, "agent-old", { name: "Renamed" })
+
+    expect(repo.updateAgent).toHaveBeenCalledWith(
+      fakeUser.id,
+      "agent-old",
+      expect.objectContaining({
+        name: "Renamed",
+        model: {
+          provider: "spacexai",
+          model: "spacexai/grok-voice-3.0",
+        },
+        voice: { voiceId: "ara", provider: "spacexai" },
+      })
+    )
+  })
 })
