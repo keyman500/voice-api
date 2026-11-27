@@ -6,7 +6,7 @@ import type {
 } from "ai"
 import { createVoiceRepository, type VoiceRepository } from "./voice-repository"
 import { getBillingService, type BillingService } from "./billing"
-import { realtimeModel } from "./realtime-models"
+import { realtimeModel, resolveRealtimeModelId } from "./realtime-models"
 import { VoiceServiceError } from "./voice-service"
 
 type SendTwilio = (payload: Record<string, unknown>) => void
@@ -83,7 +83,8 @@ class RealtimeCallSession {
       this.input.userId,
       this.input.callId
     )
-    if (!call || call.voiceEngine !== "realtime" || !call.realtimeModel) {
+    const realtimeModelId = resolveRealtimeModelId(call?.realtimeModel)
+    if (!call || call.voiceEngine !== "realtime" || !realtimeModelId) {
       throw new VoiceServiceError(
         400,
         "REALTIME_CALL_INVALID",
@@ -101,8 +102,8 @@ class RealtimeCallSession {
       )
     }
     const factory = gateway.experimental_realtime
-    this.model = factory(call.realtimeModel)
-    const token = await factory.getToken({ model: call.realtimeModel })
+    this.model = factory(realtimeModelId)
+    const token = await factory.getToken({ model: realtimeModelId })
     const config = this.model.getWebSocketConfig(token)
     const socket = new WebSocket(config.url, config.protocols)
     this.gatewaySocket = socket
@@ -141,7 +142,7 @@ class RealtimeCallSession {
         },
         (agent.maxDurationSeconds ?? 1440) * 1000
       )
-      this.persist("realtime.gateway.connected", { model: call.realtimeModel })
+      this.persist("realtime.gateway.connected", { model: realtimeModelId })
     }
     socket.onmessage = (message) => void this.handleGatewayMessage(message.data)
     socket.onerror = () =>
@@ -151,6 +152,7 @@ class RealtimeCallSession {
     socket.onclose = () => this.persist("realtime.gateway.closed")
     await this.input.repo.updateCall(this.input.userId, this.input.callId, {
       status: "in-progress",
+      realtimeModel: realtimeModelId,
       startedAt: new Date(),
       relaySessionId: undefined,
     })
@@ -264,12 +266,18 @@ class RealtimeCallSession {
       this.input.userId,
       this.input.callId
     )
-    const capability = realtimeModel(call?.realtimeModel)
+    const billedModel = resolveRealtimeModelId(call?.realtimeModel)
+    const capability = realtimeModel(billedModel)
     const inputSeconds = this.inputBytes / 8000
     const outputSeconds = this.outputBytes / 8000
     let totalProviderCostUsd = 0
-    if (capability?.pricingUnit === "audio-minute") {
-      totalProviderCostUsd = ((inputSeconds + outputSeconds) / 60) * 0.05
+    if (
+      capability?.pricingUnit === "audio-minute" &&
+      capability.estimatedProviderUsdPerMinute != null
+    ) {
+      totalProviderCostUsd =
+        ((inputSeconds + outputSeconds) / 60) *
+        capability.estimatedProviderUsdPerMinute
     } else if (capability?.pricingUnit === "audio-token") {
       const inputTokens = this.inputAudioTokens || inputSeconds * 10
       const outputTokens = this.outputAudioTokens || outputSeconds * 20
@@ -287,7 +295,7 @@ class RealtimeCallSession {
       callId: this.input.callId,
       agentId: call.agentId,
       kind: "realtime_audio",
-      model: call.realtimeModel,
+      model: billedModel ?? call.realtimeModel,
       durationSeconds: Math.ceil(inputSeconds + outputSeconds),
       credits: providerCostUsd * 1.5 * 100,
       providerCostUsd,

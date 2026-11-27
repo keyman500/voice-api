@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import * as schema from "@/lib/schema"
 import { VOICE_API_PROVIDER_ID } from "@/lib/voice-constants"
 import { decryptSecret, encryptSecret } from "./encryption"
+import { replaceRetiredRealtimeModel } from "./realtime-models"
 import type {
   JsonAgent,
   JsonCall,
@@ -78,13 +79,20 @@ function secretUpdate(value: string | null | undefined) {
 }
 
 function toAgent(row: typeof schema.voiceAgent.$inferSelect): JsonAgent {
+  const storedModel = (row.model as JsonAgent["model"]) ?? undefined
+  const model = replaceRetiredRealtimeModel(storedModel) ?? undefined
+  const storedVoice = (row.voice as JsonAgent["voice"]) ?? undefined
+  const voice =
+    model && model !== storedModel && storedVoice?.provider === "xai"
+      ? { ...storedVoice, provider: model.provider }
+      : storedVoice
   return {
     id: row.id,
     provider: VOICE_API_PROVIDER_ID,
     voiceEngine: row.voiceEngine as JsonAgent["voiceEngine"],
     name: row.name ?? undefined,
-    voice: (row.voice as JsonAgent["voice"]) ?? undefined,
-    model: (row.model as JsonAgent["model"]) ?? undefined,
+    voice,
+    model,
     firstMessage: row.firstMessage ?? undefined,
     maxDurationSeconds: row.maxDurationSeconds ?? undefined,
     successEvaluationPrompt: row.successEvaluationPrompt ?? undefined,

@@ -4,6 +4,7 @@ import {
   REALTIME_MAX_DURATION_SECONDS,
   realtimeModel,
   realtimeModelsForApi,
+  replaceRetiredRealtimeModel,
 } from "@/lib/services/realtime-models"
 import {
   mergeTranscriptSegments,
@@ -15,16 +16,23 @@ describe("realtime voice engine", () => {
   it("publishes the supported Gateway realtime model catalog", () => {
     const catalog = realtimeModelsForApi()
     expect(catalog.maxDurationSeconds).toBe(REALTIME_MAX_DURATION_SECONDS)
-    expect(catalog.transcriptionModel).toBe("xai/grok-stt")
+    expect(catalog.transcriptionModel).toBe("spacexai/grok-stt")
     expect(catalog.models.map((item) => item.model)).toEqual([
-      "xai/grok-voice-think-fast-1.0",
+      "spacexai/grok-voice-3.0",
       "openai/gpt-realtime-mini",
       "openai/gpt-realtime-1.5",
       "openai/gpt-realtime-2",
     ])
-    expect(realtimeModel("xai/grok-voice-think-fast-1.0")?.voices).toContain(
-      "eve"
-    )
+    expect(realtimeModel("spacexai/grok-voice-3.0")?.voices).toContain("eve")
+    expect(
+      replaceRetiredRealtimeModel({
+        provider: "xai",
+        model: "xai/grok-voice-think-fast-1.0",
+      })
+    ).toEqual({
+      provider: "spacexai",
+      model: "spacexai/grok-voice-3.0",
+    })
   })
 
   it("creates recording bidirectional Media Stream TwiML", () => {
